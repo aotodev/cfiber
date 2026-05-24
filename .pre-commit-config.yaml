@@ -40,11 +40,12 @@ repos:
     hooks:
       - id: shellcheck
 
+  # cmake-format is deliberately omitted — its layout algorithms don't preserve
+  # the project's hand-formatted multi-line style. cmake-lint catches structural
+  # issues without imposing formatting.
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.13
     hooks:
-      - id: cmake-format
-        additional_dependencies: [pyyaml]
       - id: cmake-lint
         additional_dependencies: [pyyaml]
 
