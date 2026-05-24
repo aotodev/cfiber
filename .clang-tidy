@@ -1,52 +1,29 @@
 ---
-Checks: "-*,
-clang-analyzer-*,
-concurrency-*,
-bugprone-*,
-cppcoreguidelines-*,
-cppcoreguidelines-rvalue-reference-param-not-moved,
-cppcoreguidelines-pro-type-union-access,
--cppcoreguidelines-owning-memory,
-google-build-namespaces,
-google-default-arguments,
-google-explicit-constructor,
-google-global-names-in-headers,
-misc-const-correctness,
-misc-definitions-in-headers,
-misc-misplaced-const,
-misc-redundant-expression,
-misc-static-assert,
-performance-*,
-readability-avoid-nested-conditional-operator,
-readability-avoid-const-params-in-decls,
-readability-const-return-type,
-readability-duplicate-include,
-readability-else-after-return,
-readability-enum-initial-value,
-readability-make-member-function-const,
-readability-non-const-parameter,
-readability-qualified-auto,
-readability-simplify-boolean-expr,
-readability-static-accessed-through-instance,
-readability-static-definition-in-anonymous-namespace,
-modernize-use-*,
--modernize-use-trailing-return-type,
--modernize-use-nodiscard,
--cppcoreguidelines-pro-type-union-access,
--cppcoreguidelines-pro-type-vararg,
--bugprone-easily-swappable-parameters,
--cppcoreguidelines-avoid-do-while"
+# clang-tidy configuration for cfiber.
+#
+# Curated for a C23 codebase.
+#
+# Notable disables (rationale):
+#   bugprone-easily-swappable-parameters        too pedantic for low-level APIs
+#   bugprone-assignment-in-if-condition         used intentionally in this codebase
+#   bugprone-macro-parentheses                  false positives on token-pasting macros
+#   clang-analyzer-security.insecureAPI...      Annex K (memset_s &c) not portable on glibc
+#   misc-include-cleaner                        too aggressive on transitive includes
+#   misc-no-recursion                           recursion is fine where used
+#   misc-unused-parameters                      common in callback signatures
+#   performance-no-int-to-ptr                   intentional in allocator + fiber init
+#   readability-magic-numbers                   noisy on register indices, alignments
+#   readability-identifier-length               too pedantic (i, n, p are fine)
+#   readability-function-cognitive-complexity   not actionable as a single metric
+#   readability-isolate-declaration             noisy on multi-decls in tests
+#   readability-uppercase-literal-suffix        we don't enforce case on 'ull' &c
+#   cert-dcl16-c                                alias of uppercase-literal-suffix
+#   cert-err33-c                                excessive — flags every unchecked stdlib call
+
+Checks: '-*,bugprone-*,cert-*,clang-analyzer-*,concurrency-*,misc-*,performance-*,portability-*,readability-*,-bugprone-easily-swappable-parameters,-bugprone-assignment-in-if-condition,-bugprone-macro-parentheses,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,-misc-include-cleaner,-misc-no-recursion,-misc-unused-parameters,-performance-no-int-to-ptr,-readability-magic-numbers,-readability-identifier-length,-readability-function-cognitive-complexity,-readability-isolate-declaration,-readability-uppercase-literal-suffix,-cert-dcl16-c,-cert-err33-c'
 
 WarningsAsErrors: ''
-#HeaderFilterRegex: '.*/src/.*'
-
-CheckOptions:
-  - key:   readability-uppercase-literal-suffix.NewSuffixes
-    value: 'L;LL;LU;LLU'
-  - key:   cert-dcl16-c.NewSuffixes
-    value: 'L;LL;LU;LLU'
-  - key:  hicpp-uppercase-literal-suffix.NewSuffixes
-    value: 'L;LL;LU;LLU'
+HeaderFilterRegex: '^(src|include|tests|sample)/'
+FormatStyle: file
 ...
-
 
