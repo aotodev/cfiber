@@ -35,7 +35,7 @@ static inline int bitmap_find_free(const bitmap_t* bitmap, const uint32_t words,
 #else
             const int bit = __builtin_ctz((unsigned int)inv);
 #endif
-            const uint32_t index = i * BITMAP_WORD_BITS + (uint32_t)bit;
+            const uint32_t index = (i * BITMAP_WORD_BITS) + (uint32_t)bit;
             if (index < capacity) {
                 return (int)index;
             }

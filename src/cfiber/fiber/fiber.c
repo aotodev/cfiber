@@ -11,6 +11,7 @@
  * @brief Calls the scheduler-defined epilogue when a fiber returns.
  * @details Implemented by the scheduler (see scheduler_return_fiber()).
  */
+// NOLINTNEXTLINE(misc-use-internal-linkage): false positive — called from per-arch assembly
 [[noreturn]] void fiber_epilogue(void) {
     scheduler_return_fiber();
 
@@ -18,7 +19,7 @@
     ASSERT(false);
 
     for (;;) {
-#if defined(__x86_64__)
+#ifdef __x86_64__
         __asm__ volatile("hlt");
 #elif defined(__aarch64__) || defined(__arm__)
         __asm__ volatile("wfi");
@@ -61,7 +62,7 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
 
     fiber->ctx.rsp = (uint64_t)stack_ptr;
 
-#elif defined(__aarch64__)
+#elifdef __aarch64__
     /* Align to a 16-byte boundary per AAPCS64 ABI. */
     uint8_t* stack_ptr = (uint8_t*)(stack_top & ~15ULL);
 
@@ -76,7 +77,7 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
     /* Link register points to the fiber startup routine. */
     fiber->ctx.x30 = (uint64_t)&fiber_prologue;
 
-#elif defined(__arm__)
+#elifdef __arm__
     /* Align to an 8-byte boundary per AAPCS ABI. */
     uint8_t* stack_ptr = (uint8_t*)(stack_top & ~7U);
 
