@@ -1,0 +1,54 @@
+# Build directories
+build/
+build-*/
+out/
+
+# CMake artifacts (guard against accidental in-source configure)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+Testing/
+
+# Compile artifacts (belt-and-braces with build/)
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.elf
+*.bin
+*.map
+
+# Coverage / profiling
+*.gcno
+*.gcda
+*.gcov
+coverage/
+lcov.info
+
+# Tooling
+compile_commands.json
+.cache/
+.clangd
+.ccls-cache/
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Debugger / crash dumps
+.gdb_history
+core
+core.*
+vgcore.*

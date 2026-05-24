@@ -1,0 +1,65 @@
+---
+# .clang-format file for C with BSD-like style
+# Curly braces on same column as function declaration
+
+# Base style
+BasedOnStyle: LLVM
+
+# Language specific settings (Cpp covers C language)
+Language: Cpp
+
+# Brace settings - BSD style (Allman)
+BreakBeforeBraces: Attach
+AlwaysBreakAfterReturnType: None
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+IndentCaseLabels: true
+IndentGotoLabels: true
+IndentPPDirectives: None
+
+# Function formatting
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+
+# Spacing
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+SpaceBeforeAssignmentOperators: true
+
+# Line length and wrapping
+ColumnLimit: 120
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+
+# Pointer alignment (C style)
+PointerAlignment: Left
+
+# Include sorting
+SortIncludes: true
+IncludeBlocks: Regroup
+
+# Comments
+ReflowComments: true
+
+# Other formatting options
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignTrailingComments: true
+
+# Function parameters
+BinPackParameters: false
+BinPackArguments: false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# asm
+BreakBeforeInlineASMColon: Always

@@ -1,0 +1,52 @@
+---
+Checks: "-*,
+clang-analyzer-*,
+concurrency-*,
+bugprone-*,
+cppcoreguidelines-*,
+cppcoreguidelines-rvalue-reference-param-not-moved,
+cppcoreguidelines-pro-type-union-access,
+-cppcoreguidelines-owning-memory,
+google-build-namespaces,
+google-default-arguments,
+google-explicit-constructor,
+google-global-names-in-headers,
+misc-const-correctness,
+misc-definitions-in-headers,
+misc-misplaced-const,
+misc-redundant-expression,
+misc-static-assert,
+performance-*,
+readability-avoid-nested-conditional-operator,
+readability-avoid-const-params-in-decls,
+readability-const-return-type,
+readability-duplicate-include,
+readability-else-after-return,
+readability-enum-initial-value,
+readability-make-member-function-const,
+readability-non-const-parameter,
+readability-qualified-auto,
+readability-simplify-boolean-expr,
+readability-static-accessed-through-instance,
+readability-static-definition-in-anonymous-namespace,
+modernize-use-*,
+-modernize-use-trailing-return-type,
+-modernize-use-nodiscard,
+-cppcoreguidelines-pro-type-union-access,
+-cppcoreguidelines-pro-type-vararg,
+-bugprone-easily-swappable-parameters,
+-cppcoreguidelines-avoid-do-while"
+
+WarningsAsErrors: ''
+#HeaderFilterRegex: '.*/src/.*'
+
+CheckOptions:
+  - key:   readability-uppercase-literal-suffix.NewSuffixes
+    value: 'L;LL;LU;LLU'
+  - key:   cert-dcl16-c.NewSuffixes
+    value: 'L;LL;LU;LLU'
+  - key:  hicpp-uppercase-literal-suffix.NewSuffixes
+    value: 'L;LL;LU;LLU'
+...
+
+

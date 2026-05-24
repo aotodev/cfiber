@@ -1,0 +1,290 @@
+# cfiber
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+A C library for cooperative concurrency: stackful coroutines (fibers), a
+cooperative scheduler and stack/memory allocators tuned for both hosted Linux
+and bare-metal ARM Cortex-M. Written in C23 with hand-written assembly for
+context switches.
+
+## Stackful vs stackless coroutines
+
+A stackful coroutine owns a real call stack. It can yield from any point in any
+function it calls — including from deep inside a third-party library — and the
+caller's frames are paused as a whole.
+
+A stackless coroutine is a compiler-rewritten state machine. It can only
+suspend at points the compiler can see, which means every function on the
+suspension path has to be coloured: in C++ it has to be a `co_await`able, in
+Rust it has to be `async`. Calling synchronous code from async code is fine;
+calling async code from synchronous code is not. The colour propagates outwards
+through every caller until it reaches `main`.
+
+cfiber avoids that. A fiber's body is an ordinary C function and any function
+it calls is also ordinary C. That makes it easy to turn an existing blocking
+codebase into a cooperative one: keep the call sites the same and hook the
+blocking syscalls (`read`, `write`, `accept`, ...) so that, instead of blocking
+the thread, they register interest with a poller and yield the current fiber.
+When the poller wakes the fiber up the syscall returns its result and the
+caller is none the wiser.
+
+That flexibility is not free, and stackless coroutines remain the better fit
+for some workloads. A stackless coroutine's saved state is a small,
+compiler-known struct — often well under 100 bytes — packed contiguously with
+its siblings. A fiber, by contrast, owns a full stack: at minimum one page,
+typically several. At the scale of hundreds of thousands of concurrent tasks,
+that difference dominates: the stackless layout fits in cache, the stackful
+one does not, and resuming a fiber tends to touch a cold stack page while
+resuming a stackless coroutine pulls in a single cache line. If raw
+per-coroutine throughput on a tight inner loop is the priority, or if the
+working set is enormous, stackless is usually the right tool.
+
+cfiber narrows the gap where it can. On hosted targets, stacks grow one page
+at a time on demand (backed by a guard-page SIGSEGV handler) so an idle fiber
+costs only the pages it has actually touched. On freestanding targets, the
+user sizes a slab of fixed stacks for the worst-case workload and pays no
+heap or page-fault cost at runtime. Neither closes the gap entirely; both make
+fibers practical for the cases where their flexibility is worth it.
+
+## Features
+
+- Context switches in hand-written assembly with no syscalls; only the
+  callee-saved set is preserved.
+- ABI-compliant prologues and switches for System V AMD64, AAPCS64, AAPCS
+  (Thumb-1 and Thumb-2). Optional FPU save/restore on Cortex-M4F/M7F.
+- Cooperative FCFS scheduler with dynamic spawn; no compile-time fiber-count
+  cap.
+- Slab and multislab fixed-size allocators usable without `malloc`.
+- Growable hosted stacks: `mmap` + `PROT_NONE` guard page + SIGSEGV-driven
+  growth, with a pool that recycles `MADV_DONTNEED` pages on release.
+- Pluggable backing allocator on the scheduler — pass any `(alloc, free, ctx)`
+  triple instead of `malloc`/`free`. The full library (scheduler included)
+  runs on bare metal this way.
+- Optional stack sanitizer: canary check on release + watermark-based peak
+  usage measurement. Available on hosted and freestanding builds.
+- No dependencies. The hosted portion uses POSIX (`mmap`, `mprotect`,
+  `sigaction`); the freestanding portion uses only `<stdint.h>` and `<stddef.h>`.
+
+## Platform support
+
+| Target              | ABI            | Status   | How it is tested                     |
+| ------------------- | -------------- | -------- | ------------------------------------ |
+| x86_64 Linux        | System V AMD64 | Tested   | Native, register-preservation tests  |
+| AArch64 Linux       | AAPCS64        | Tested   | `qemu-aarch64` user-mode emulation   |
+| ARM Cortex-M0 / M0+ | AAPCS Thumb-1  | Tested   | `qemu-system-arm -M microbit`        |
+| ARM Cortex-M3       | AAPCS Thumb-2  | Tested   | `qemu-system-arm -M mps2-an385`      |
+| ARM Cortex-M4 / M7  | AAPCS Thumb-2  | Tested   | `qemu-system-arm -M mps2-an386/an500`|
+
+macOS is expected to work on x86_64 and AArch64 (System V / AAPCS64 are the
+same) but is not part of the test matrix. Windows is not supported.
+
+## Requirements
+
+- CMake 3.28 or newer
+- A GNU-compatible C23 compiler. Tested with GCC 15 and Clang 22; older
+  versions back to GCC 14 / Clang 19 should work but are unverified.
+- For ARM cross-builds: `arm-none-eabi-gcc` and `qemu-system-arm`
+- For AArch64 cross-builds: `aarch64-linux-gnu-gcc` and `qemu-user`
+
+Select a compiler at configure time with `CC=clang cmake ...` or
+`CC=clang ./utils/make.sh ...`.
+
+## Building
+
+```bash
+cmake -B build -DBUILD_SAMPLE=ON -DBUILD_TESTS=ON
+cmake --build build -j
+ctest --test-dir build
+```
+
+A convenience script handles native and cross builds plus QEMU execution:
+
+```bash
+./utils/make.sh -t -s                              # native, tests + sample
+./utils/make.sh -t -s --sanitizer                  # with stack sanitizer
+./utils/make.sh -t -s -d                           # Debug build
+./utils/make.sh -t -s --shared                     # shared library
+./utils/make.sh -t -s --pic                        # static + PIC
+./utils/make.sh --arch=aarch64 -t -s               # AArch64 via qemu-user
+./utils/make.sh --arch=arm --cpu=cortex-m0 -t      # Cortex-M0
+./utils/make.sh --arch=arm --cpu=cortex-m7 -t      # Cortex-M7 with FPU
+./utils/make.sh --help
+```
+
+### CMake options
+
+| Option                              | Default | Description                                                  |
+| ----------------------------------- | ------- | ------------------------------------------------------------ |
+| `BUILD_SAMPLE`                      | `OFF`   | Build the sample scheduler executable                        |
+| `BUILD_TESTS`                       | `OFF`   | Build the unit-test executables                              |
+| `CFIBER_STACK_SANITIZER`            | `OFF`   | Enable canary + watermark instrumentation                    |
+| `CFIBER_BUILD_SHARED`               | `OFF`   | Build as a shared library (`libcfiber.so`) instead of static |
+| `CFIBER_POSITION_INDEPENDENT_CODE`  | `OFF`   | Build the static library with `-fPIC` (ignored when shared)  |
+| `CFIBER_TARGET_CPU`                 | —       | `cortex-m0` / `cortex-m3` / `cortex-m4` / `cortex-m7`        |
+| `CFIBER_ARM_FLOAT_ABI`              | —       | `soft` / `softfp` / `hard`                                   |
+| `CFIBER_ARM_FPU`                    | —       | FPU name forwarded to `-mfpu` (e.g. `fpv5-sp-d16`)           |
+
+The default is a static archive. Shared builds export only the documented API
+(everything declared with `CFIBER_EXPORT` in the public headers) and hide
+everything else via `-fvisibility=hidden`. Shared builds carry the project
+version as `SOVERSION`. The shared build is not available on the freestanding
+target (bare-metal Cortex-M has no dynamic loader).
+
+If the static library will be linked into a downstream shared object, enable
+`CFIBER_POSITION_INDEPENDENT_CODE` to avoid text-relocation errors.
+
+One caveat for shared builds: cfiber's `scheduler_return_fiber` symbol is
+overridable at link time when using the static library (a user can replace the
+built-in scheduler's definition with their own). That override mechanism does
+not work through a shared library, so projects that need a custom
+`scheduler_return_fiber` must use the static build.
+
+### Consuming as a subdirectory
+
+```cmake
+add_subdirectory(external/cfiber)
+target_link_libraries(my_app PRIVATE cfiber)
+```
+
+To switch to a shared build from a parent project:
+
+```cmake
+set(CFIBER_BUILD_SHARED ON CACHE BOOL "" FORCE)
+add_subdirectory(external/cfiber)
+target_link_libraries(my_app PRIVATE cfiber)
+```
+
+## Hosted example
+
+A scheduler-managed fiber on Linux. The scheduler owns both the task records
+and the fiber stacks; nothing else needs to be allocated.
+
+```c
+#include "cfiber/scheduler/scheduler.h"
+#include <stdio.h>
+
+static void worker(void* arg) {
+    const char* name = arg;
+    for (int i = 0; i < 3; i++) {
+        printf("%s: step %d\n", name, i);
+        cfiber_yield();
+    }
+}
+
+int main(void) {
+    cfiber_scheduler_t sched;
+    cfiber_scheduler_init(&sched, (cfiber_scheduler_config_t){
+        .stack_size      = 8192,
+        .fibers_per_slab = 16,
+    });
+
+    cfiber_scheduler_spawn(&sched, worker, "A");
+    cfiber_scheduler_spawn(&sched, worker, "B");
+
+    cfiber_scheduler_run(&sched);
+    cfiber_scheduler_destroy(&sched);
+    return 0;
+}
+```
+
+See [sample/runtime_example.c](sample/runtime_example.c) for nested spawns and
+fibers that spawn other fibers.
+
+## Freestanding example
+
+The full feature set — scheduler, slab/multislab allocators, fixed-size stack
+manager, and the canary/watermark sanitizer — works on bare metal. The only
+hosted-only components are the growable-stack allocator and its SIGSEGV handler
+(both require an MMU and POSIX signals).
+
+To use the scheduler without `malloc`/`free`, pass a backing allocator to
+`cfiber_scheduler_init_ext`. The scheduler hands every multislab request
+through that callback, so task records and fiber stacks all come out of a
+region the user owns.
+
+```c
+#include "cfiber/scheduler/scheduler.h"
+
+/* User-owned arena. Sized for: 2 slabs of 4 cfiber_task_t + 2 slabs of 4
+ * stacks of 512 bytes + bookkeeping. Real applications should derive this
+ * from the worst-case fiber count and stack size. */
+alignas(64) static uint8_t arena[8192];
+static size_t arena_used;
+
+static void* bump_alloc(size_t size, void* ctx) {
+    (void)ctx;
+    size = (size + 7u) & ~(size_t)7u;
+    if (arena_used + size > sizeof(arena)) {
+        return nullptr;
+    }
+    void* p = &arena[arena_used];
+    arena_used += size;
+    return p;
+}
+
+static void bump_free(void* ptr, size_t size, void* ctx) {
+    /* Bump allocator never reclaims; release is a no-op. */
+    (void)ptr; (void)size; (void)ctx;
+}
+
+static void blink(void* arg) {
+    volatile int* counter = arg;
+    for (int i = 0; i < 4; i++) {
+        (*counter)++;
+        cfiber_yield();
+    }
+}
+
+int main(void) {
+    cfiber_scheduler_t sched;
+    cfiber_scheduler_init_ext(&sched,
+        (cfiber_scheduler_config_t){
+            .stack_size      = 512,
+            .fibers_per_slab = 4,
+            .max_slabs       = 2,
+        },
+        bump_alloc, bump_free, nullptr);
+
+    int c = 0;
+    cfiber_scheduler_spawn(&sched, blink, &c);
+    cfiber_scheduler_spawn(&sched, blink, &c);
+
+    cfiber_scheduler_run(&sched);
+    return c;
+}
+```
+
+The freestanding build is selected automatically when the target architecture
+is `arm`. In that mode the public macro `CFIBER_FREESTANDING=1` is defined and
+the growable-stack sources are excluded. Everything else — including the
+fixed-size stack allocator at [include/cfiber/stack/fixed_size_stack_allocator.h](include/cfiber/stack/fixed_size_stack_allocator.h)
+and the sanitizer — is available.
+
+If a scheduler is not desired, fibers can be driven directly with `init_fiber`
+and `switch_context` and the user supplies their own `scheduler_return_fiber`
+implementation (called when a fiber's entry function returns).
+
+## Project layout
+
+```
+include/cfiber/
+  core/        compiler attributes, branch hints, bitmap word type
+  fiber/       low-level context + fiber API (context.h, fiber.h)
+  memory/      slab + multislab allocators
+  scheduler/   cooperative FCFS scheduler
+  stack/       stack descriptor + fixed-size and growable allocators
+    debug/     canary + watermark sanitizer
+src/cfiber/    matching implementation files; per-arch assembly under fiber/
+sample/        example using the built-in scheduler
+tests/
+  fiber/       register-preservation tests, one per architecture
+  stack/       sanitizer tests
+utils/
+  make.sh      build + run convenience script
+  cortex/      startup code and linker scripts for QEMU Cortex-M targets
+cmake/         toolchain files and helpers
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
