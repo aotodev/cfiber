@@ -9,6 +9,7 @@
 #   -t, --tests        Build and run unit tests
 #   -v, --verbose      Verbose build output
 #       --sanitizer    Enable the stack sanitizer (canary + watermark)
+#       --asan         Enable AddressSanitizer (hosted x86_64 only)
 #       --clean        Remove the previous build directory before configuring
 #   -h, --help         Show this help message
 
@@ -46,6 +47,8 @@ Usage: $(basename "$0") [options]
   -t, --tests        Build and run unit tests
   -v, --verbose      Verbose build output
       --sanitizer    Enable the stack sanitizer (canary + watermark)
+      --asan         Enable AddressSanitizer (hosted x86_64 only; mutually
+                     exclusive with --sanitizer)
       --shared       Build cfiber as a shared library (default: static)
       --pic          Build the static library with -fPIC (ignored with --shared)
       --clean        Remove the previous build directory before configuring
@@ -115,6 +118,7 @@ for arg in "$@"; do
         -t|--tests)     build_tests=ON ;;
         -v|--verbose)   verbose=--verbose ;;
         --sanitizer)    stack_sanitizer=ON ;;
+        --asan)         asan=ON ;;
         --shared)       build_shared=ON ;;
         --pic)          build_pic=ON ;;
         --clean)        clean_build=1 ;;
@@ -184,6 +188,25 @@ esac
 require_tool cmake
 
 # --------------------------------------------------------------------------------------
+# AddressSanitizer validation. ASan is a hosted instrumentation kept separate
+# from the canary/watermark sanitizer (they are mutually exclusive, and target
+# different platforms). It is only wired up for the native x86_64 build here:
+# the aarch64 path runs under qemu-user, whose address-space handling does not
+# support ASan's shadow memory, and the arm path is bare metal where ASan does
+# not exist.
+# --------------------------------------------------------------------------------------
+if [[ "${asan:-OFF}" == ON ]]; then
+    if [[ "${stack_sanitizer:-OFF}" == ON ]]; then
+        die "--asan and --sanitizer are mutually exclusive (canary word overlaps the ASan redzone)."
+    fi
+    case "${target_arch}" in
+        x86_64|AMD64) ;;
+        *) die "--asan is only supported on native x86_64 (aarch64 runs under qemu-user, which ASan does not support; arm is bare metal)." ;;
+    esac
+    export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_stack_use_after_return=1}"
+fi
+
+# --------------------------------------------------------------------------------------
 # Build directory — one canonical path per (os, arch, cpu, config) so toggling
 # options between runs reuses the incremental build.
 # --------------------------------------------------------------------------------------
@@ -206,6 +229,7 @@ cmake -S "${project_root}" -B "${build_dir}" \
     -DBUILD_TESTS="${build_tests:-OFF}" \
     -DBUILD_SAMPLE="${build_sample:-OFF}" \
     -DCFIBER_STACK_SANITIZER="${stack_sanitizer:-OFF}" \
+    -DCFIBER_ASAN="${asan:-OFF}" \
     -DCFIBER_BUILD_SHARED="${build_shared:-OFF}" \
     -DCFIBER_POSITION_INDEPENDENT_CODE="${build_pic:-OFF}" \
     ${toolchain_file:+-DCMAKE_TOOLCHAIN_FILE="${toolchain_file}"} \
