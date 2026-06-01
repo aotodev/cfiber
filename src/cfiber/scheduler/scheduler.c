@@ -1,5 +1,7 @@
 #include "cfiber/scheduler/scheduler.h"
 
+#include "cfiber/debug/asan.h"
+
 #include <string.h>
 
 /* ============================================================================
@@ -44,7 +46,12 @@ static inline cfiber_task_t* dequeue_ready(cfiber_scheduler_t* s) {
  * ============================================================================ */
 
 static void task_free(cfiber_scheduler_t* s, cfiber_task_t* t) {
-    multislab_release(&s->stack_alloc, t->fiber.stack);
+    /* fiber.stack points just above the poisoned redzone; recover the slab
+     * block base (which the allocator expects) and clear the poison so the
+     * block can be reused. Both are no-ops when ASan is disabled (REDZONE 0). */
+    uint8_t* block = t->fiber.stack - CFIBER_ASAN_REDZONE;
+    cfiber_asan_unpoison(block, CFIBER_ASAN_REDZONE);
+    multislab_release(&s->stack_alloc, block);
     multislab_release(&s->task_alloc, t);
 }
 
@@ -66,8 +73,12 @@ static void task_free(cfiber_scheduler_t* s, cfiber_task_t* t) {
     s->active_count--;
 
     /* Return to the scheduler loop (cfiber_scheduler_run) which can safely
-     * deallocate the zombie since it runs on the caller's stack. */
-    switch_context(&dead->fiber.ctx, &s->sched_ctx);
+     * deallocate the zombie since it runs on the caller's stack. The fiber is
+     * terminating, so tell ASan to discard its fake stack (finishing = true). */
+    const void* host_low;
+    size_t host_size;
+    cfiber_asan_host_bounds(&host_low, &host_size);
+    cfiber_asan_switch(&dead->fiber.ctx, &s->sched_ctx, host_low, host_size, true);
     __builtin_unreachable();
 }
 
@@ -103,11 +114,18 @@ int cfiber_scheduler_init_ext(cfiber_scheduler_t* sched,
         return rc;
     }
 
+    /* Reserve a poisoned guard below each stack so a downward overflow trips
+     * ASan instead of silently corrupting the adjacent stack in the slab. The
+     * redzone is added on top of the requested usable size and rounds back up
+     * to the cache-line granularity the slab requires. REDZONE is 0 (and the
+     * block size unchanged) when ASan is disabled. */
+    const size_t stack_block = align_up(config.stack_size + CFIBER_ASAN_REDZONE, CACHE_LINE_SIZE);
+
     if (mem_alloc && mem_free) {
         rc = multislab_init_ext(
-            &sched->stack_alloc, config.stack_size, per_slab, config.max_slabs, 1, mem_alloc, mem_free, mem_ctx);
+            &sched->stack_alloc, stack_block, per_slab, config.max_slabs, 1, mem_alloc, mem_free, mem_ctx);
     } else {
-        rc = multislab_init(&sched->stack_alloc, config.stack_size, per_slab, config.max_slabs, 1);
+        rc = multislab_init(&sched->stack_alloc, stack_block, per_slab, config.max_slabs, 1);
     }
     if (rc != 0) {
         multislab_destroy(&sched->task_alloc);
@@ -135,13 +153,17 @@ bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, fiber_fn func, void* user
         return false;
     }
 
-    uint8_t* stack = multislab_alloc(&sched->stack_alloc);
-    if (UNLIKELY(!stack)) {
+    uint8_t* block = multislab_alloc(&sched->stack_alloc);
+    if (UNLIKELY(!block)) {
         multislab_release(&sched->task_alloc, task);
         return false;
     }
 
-    task->fiber.stack = stack;
+    /* Poison the redzone at the bottom of the block; the usable stack starts
+     * just above it. No-op / zero offset when ASan is disabled. */
+    cfiber_asan_poison(block, CFIBER_ASAN_REDZONE);
+
+    task->fiber.stack = block + CFIBER_ASAN_REDZONE;
     task->fiber.stack_size = sched->stack_size;
     memset(&task->fiber.ctx, 0, sizeof(context_t));
     task->next = nullptr;
@@ -171,7 +193,7 @@ void cfiber_scheduler_run(cfiber_scheduler_t* sched) {
         }
 
         sched->current = next;
-        switch_context(&sched->sched_ctx, &next->fiber.ctx);
+        cfiber_asan_switch(&sched->sched_ctx, &next->fiber.ctx, next->fiber.stack, next->fiber.stack_size, false);
         /* control returns here when the fiber yields or completes */
     }
 
@@ -209,7 +231,10 @@ void cfiber_yield(void) {
     /* Re-enqueue current and return to the scheduler loop. */
     enqueue_ready(s, cur);
     s->current = nullptr;
-    switch_context(&cur->fiber.ctx, &s->sched_ctx);
+    const void* host_low;
+    size_t host_size;
+    cfiber_asan_host_bounds(&host_low, &host_size);
+    cfiber_asan_switch(&cur->fiber.ctx, &s->sched_ctx, host_low, host_size, false);
 }
 
 bool cfiber_spawn(fiber_fn func, void* user_data) {
