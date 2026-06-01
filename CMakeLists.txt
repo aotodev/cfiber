@@ -16,6 +16,10 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 option(BUILD_SAMPLE                     "Build sample scheduler"                             OFF)
 option(BUILD_TESTS                      "Build unit tests"                                   OFF)
 option(CFIBER_STACK_SANITIZER           "Enable stack canary + watermark for non-MMU stacks" OFF)
+option(CFIBER_ASAN                      "Build with AddressSanitizer + fiber-aware instrumentation (hosted only)" OFF)
+
+set(CFIBER_ASAN_REDZONE "" CACHE STRING
+    "Size in bytes of the poisoned guard below each fiber stack (default: one cache line). Only used when CFIBER_ASAN is ON.")
 option(CFIBER_BUILD_SHARED              "Build cfiber as a shared library (default: static)" OFF)
 option(CFIBER_POSITION_INDEPENDENT_CODE "Build the static library with -fPIC (ignored when shared)" OFF)
 
@@ -96,6 +100,7 @@ target_sources(cfiber PRIVATE
     ${_cfiber_src_dir}/memory/slab_alloc.c
     ${_cfiber_src_dir}/memory/multislab_alloc.c
     ${_cfiber_src_dir}/scheduler/scheduler.c
+    ${_cfiber_src_dir}/debug/asan.c
 )
 
 target_include_directories(cfiber PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -125,6 +130,40 @@ if(CFIBER_STACK_SANITIZER)
         ${_cfiber_src_dir}/stack/debug/watermark.c
     )
     target_compile_definitions(cfiber PUBLIC CFIBER_STACK_SANITIZER=1)
+endif()
+
+# ---------------------------------------------------------------------------------------
+# AddressSanitizer (hosted only). The hosted counterpart to the canary/watermark
+# sanitizer above: poisons a guard below each fiber stack and keeps ASan in sync
+# across context switches. Flags are PUBLIC so consumers of the static library
+# also build/link against ASan (mandatory — a partially-instrumented program
+# misbehaves at link/run time).
+# ---------------------------------------------------------------------------------------
+if(CFIBER_ASAN)
+    if(CFIBER_STACK_SANITIZER)
+        message(FATAL_ERROR
+            "CFIBER_ASAN and CFIBER_STACK_SANITIZER are mutually exclusive: the canary "
+            "word lives where the ASan redzone is placed, and the two detectors target "
+            "different platforms (canary = freestanding/Cortex-M, ASan = hosted).")
+    endif()
+    if(CFIBER_FREESTANDING)
+        message(FATAL_ERROR
+            "CFIBER_ASAN requires a hosted target; AddressSanitizer is not available on "
+            "bare-metal Cortex-M. Use CFIBER_STACK_SANITIZER there instead.")
+    endif()
+
+    target_compile_options(cfiber PUBLIC
+        $<$<COMPILE_LANGUAGE:C,ASM>:-fsanitize=address>
+        $<$<COMPILE_LANGUAGE:C>:-fno-omit-frame-pointer>
+    )
+    target_link_options(cfiber PUBLIC -fsanitize=address)
+
+    # Optional override of the guard size. PUBLIC so the layout matches in any
+    # consumer that also includes cfiber/debug/asan.h.
+    if(CFIBER_ASAN_REDZONE)
+        target_compile_definitions(cfiber PUBLIC
+            "CFIBER_ASAN_REDZONE=((size_t)${CFIBER_ASAN_REDZONE})")
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------------------
