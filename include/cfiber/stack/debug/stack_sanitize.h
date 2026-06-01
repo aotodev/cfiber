@@ -4,6 +4,13 @@
  * @details Provides canary overflow detection and watermark-based usage tracking.
  *          Enabled by defining CFIBER_STACK_SANITIZER=1 at build time.
  *          Not intended for use with growable (MMU-backed) stacks.
+ *
+ *          This is the freestanding / non-MMU (e.g. Cortex-M) counterpart to the
+ *          AddressSanitizer integration in cfiber/debug/asan.h, which provides
+ *          stronger, instruction-accurate detection on hosted targets. The two
+ *          are mutually exclusive: the canary word at mem_base would land inside
+ *          the ASan redzone, so enabling both CFIBER_STACK_SANITIZER and
+ *          CFIBER_ASAN is rejected at configure time.
  */
 
 #ifndef CFIBER_DEBUG_STACK_SANITIZE_H
