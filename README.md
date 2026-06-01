@@ -62,6 +62,11 @@ fibers practical for the cases where their flexibility is worth it.
   runs on bare metal this way.
 - Optional stack sanitizer: canary check on release + watermark-based peak
   usage measurement. Available on hosted and freestanding builds.
+- Optional AddressSanitizer integration (hosted): a poisoned guard below every
+  fiber stack turns silent inter-stack overflow into an instruction-accurate
+  report, and the `__sanitizer_*_switch_fiber` annotations keep ASan's
+  stack-use-after-return tracking correct across context switches. Reusable from
+  a custom scheduler via [include/cfiber/debug/asan.h](include/cfiber/debug/asan.h).
 - No dependencies. The hosted portion uses POSIX (`mmap`, `mprotect`,
   `sigaction`); the freestanding portion uses only `<stdint.h>` and `<stddef.h>`.
 
@@ -101,7 +106,8 @@ A convenience script handles native and cross builds plus QEMU execution:
 
 ```bash
 ./utils/make.sh -t -s                              # native, tests + sample
-./utils/make.sh -t -s --sanitizer                  # with stack sanitizer
+./utils/make.sh -t -s --sanitizer                  # with stack sanitizer (canary)
+./utils/make.sh -t -s --asan                       # with AddressSanitizer (x86_64)
 ./utils/make.sh -t -s -d                           # Debug build
 ./utils/make.sh -t -s --shared                     # shared library
 ./utils/make.sh -t -s --pic                        # static + PIC
@@ -118,6 +124,8 @@ A convenience script handles native and cross builds plus QEMU execution:
 | `BUILD_SAMPLE`                      | `OFF`   | Build the sample scheduler executable                        |
 | `BUILD_TESTS`                       | `OFF`   | Build the unit-test executables                              |
 | `CFIBER_STACK_SANITIZER`            | `OFF`   | Enable canary + watermark instrumentation                    |
+| `CFIBER_ASAN`                       | `OFF`   | Build with AddressSanitizer + fiber-aware instrumentation (hosted only; excludes `CFIBER_STACK_SANITIZER`) |
+| `CFIBER_ASAN_REDZONE`               | —       | Guard size in bytes below each fiber stack (default: one cache line). Only used with `CFIBER_ASAN` |
 | `CFIBER_BUILD_SHARED`               | `OFF`   | Build as a shared library (`libcfiber.so`) instead of static |
 | `CFIBER_POSITION_INDEPENDENT_CODE`  | `OFF`   | Build the static library with `-fPIC` (ignored when shared)  |
 | `CFIBER_TARGET_CPU`                 | —       | `cortex-m0` / `cortex-m3` / `cortex-m4` / `cortex-m7`        |
@@ -264,11 +272,66 @@ If a scheduler is not desired, fibers can be driven directly with `init_fiber`
 and `switch_context` and the user supplies their own `scheduler_return_fiber`
 implementation (called when a fiber's entry function returns).
 
+## Debugging with AddressSanitizer
+
+On hosted targets, `CFIBER_ASAN` builds the library (and, via PUBLIC usage
+requirements, the consuming program) with AddressSanitizer plus two pieces of
+fiber-specific instrumentation:
+
+- **A poisoned guard below every fiber stack.** The scheduler packs many stacks
+  contiguously in one allocation, so a downward overflow normally just corrupts
+  the neighbouring stack with nothing to notice it. cfiber reserves a redzone
+  below each stack (one cache line by default, `CFIBER_ASAN_REDZONE` to widen)
+  and poisons it, turning that overflow into an immediate ASan report.
+- **Context-switch annotations.** Swapping the stack pointer by hand hides the
+  switch from ASan and breaks its stack-use-after-return tracking. The
+  `__sanitizer_start_switch_fiber` / `__sanitizer_finish_switch_fiber` pair is
+  issued around every switch so ASan always knows which stack is live.
+
+```bash
+cmake -B build -DCFIBER_ASAN=ON -DBUILD_TESTS=ON
+cmake --build build -j
+ASAN_OPTIONS=detect_stack_use_after_return=1 ctest --test-dir build
+# or: ./utils/make.sh -t -s --asan
+```
+
+This is the hosted counterpart to `CFIBER_STACK_SANITIZER` (canary + watermark),
+which targets freestanding / non-MMU builds where ASan is unavailable. The two
+are mutually exclusive — the canary word would land inside the ASan redzone — so
+enabling both is rejected at configure time. AddressSanitizer is not usable
+under `qemu-user`, so the AArch64 cross/QEMU flow does not support it; use a
+native build.
+
+### Using the instrumentation with a custom scheduler
+
+The instrumentation lives in [include/cfiber/debug/asan.h](include/cfiber/debug/asan.h),
+independent of the built-in scheduler, so a custom driver can adopt it. Every
+entry point compiles to nothing when ASan is disabled, so calls can be left
+unconditionally in place.
+
+- `cfiber_asan_poison(addr, size)` / `cfiber_asan_unpoison(addr, size)` — manage
+  a guard region; poison `CFIBER_ASAN_REDZONE` bytes below each usable stack on
+  allocation and unpoison on release.
+- `cfiber_asan_switch(from, to, to_stack_low, to_stack_size, finishing)` —
+  replaces `switch_context`. Pass the target stack's low address and size, and
+  `finishing = true` only when the outgoing fiber is terminating (so its fake
+  stack is discarded rather than saved for a resume that never comes).
+- `cfiber_asan_on_fiber_entry()` — call once at the very top of a freshly
+  started fiber, before its entry function, to complete the switch ASan was told
+  about when the fiber was first scheduled. The built-in driver does this from
+  its assembly prologue; a custom prologue must do the same.
+
+The protocol is: the party leaving a stack issues the `start` (inside
+`cfiber_asan_switch`), and the party arriving issues the `finish` — either from
+`cfiber_asan_switch` when resuming a suspended fiber, or from
+`cfiber_asan_on_fiber_entry` when entering a fresh one.
+
 ## Project layout
 
 ```
 include/cfiber/
   core/        compiler attributes, branch hints, bitmap word type
+  debug/       AddressSanitizer integration (poisoning + switch annotations)
   fiber/       low-level context + fiber API (context.h, fiber.h)
   memory/      slab + multislab allocators
   scheduler/   cooperative FCFS scheduler
