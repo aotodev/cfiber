@@ -7,45 +7,6 @@ cooperative scheduler and stack/memory allocators tuned for both hosted Linux
 and bare-metal ARM Cortex-M. Written in C23 with hand-written assembly for
 context switches.
 
-## Stackful vs stackless coroutines
-
-A stackful coroutine owns a real call stack. It can yield from any point in any
-function it calls — including from deep inside a third-party library — and the
-caller's frames are paused as a whole.
-
-A stackless coroutine is a compiler-rewritten state machine. It can only
-suspend at points the compiler can see, which means every function on the
-suspension path has to be coloured: in C++ it has to be a `co_await`able, in
-Rust it has to be `async`. Calling synchronous code from async code is fine;
-calling async code from synchronous code is not. The colour propagates outwards
-through every caller until it reaches `main`.
-
-cfiber avoids that. A fiber's body is an ordinary C function and any function
-it calls is also ordinary C. That makes it easy to turn an existing blocking
-codebase into a cooperative one: keep the call sites the same and hook the
-blocking syscalls (`read`, `write`, `accept`, ...) so that, instead of blocking
-the thread, they register interest with a poller and yield the current fiber.
-When the poller wakes the fiber up the syscall returns its result and the
-caller is none the wiser.
-
-That flexibility is not free, and stackless coroutines remain the better fit
-for some workloads. A stackless coroutine's saved state is a small,
-compiler-known struct — often well under 100 bytes — packed contiguously with
-its siblings. A fiber, by contrast, owns a full stack: at minimum one page,
-typically several. At the scale of hundreds of thousands of concurrent tasks,
-that difference dominates: the stackless layout fits in cache, the stackful
-one does not, and resuming a fiber tends to touch a cold stack page while
-resuming a stackless coroutine pulls in a single cache line. If raw
-per-coroutine throughput on a tight inner loop is the priority, or if the
-working set is enormous, stackless is usually the right tool.
-
-cfiber narrows the gap where it can. On hosted targets, stacks grow one page
-at a time on demand (backed by a guard-page SIGSEGV handler) so an idle fiber
-costs only the pages it has actually touched. On freestanding targets, the
-user sizes a slab of fixed stacks for the worst-case workload and pays no
-heap or page-fault cost at runtime. Neither closes the gap entirely; both make
-fibers practical for the cases where their flexibility is worth it.
-
 ## Features
 
 - Context switches in hand-written assembly with no syscalls; only the
@@ -161,6 +122,45 @@ set(CFIBER_BUILD_SHARED ON CACHE BOOL "" FORCE)
 add_subdirectory(external/cfiber)
 target_link_libraries(my_app PRIVATE cfiber)
 ```
+
+## Stackful vs stackless coroutines
+
+A stackful coroutine owns a real call stack. It can yield from any point in any
+function it calls — including from deep inside a third-party library — and the
+caller's frames are paused as a whole.
+
+A stackless coroutine is a compiler-rewritten state machine. It can only
+suspend at points the compiler can see, which means every function on the
+suspension path has to be coloured: in C++ it has to be a `co_await`able, in
+Rust it has to be `async`. Calling synchronous code from async code is fine;
+calling async code from synchronous code is not. The colour propagates outwards
+through every caller until it reaches `main`.
+
+cfiber avoids that. A fiber's body is an ordinary C function and any function
+it calls is also ordinary C. That makes it easy to turn an existing blocking
+codebase into a cooperative one: keep the call sites the same and hook the
+blocking syscalls (`read`, `write`, `accept`, ...) so that, instead of blocking
+the thread, they register interest with a poller and yield the current fiber.
+When the poller wakes the fiber up the syscall returns its result and the
+caller is none the wiser.
+
+That flexibility is not free, and stackless coroutines remain the better fit
+for some workloads. A stackless coroutine's saved state is a small,
+compiler-known struct — often well under 100 bytes — packed contiguously with
+its siblings. A fiber, by contrast, owns a full stack: at minimum one page,
+typically several. At the scale of hundreds of thousands of concurrent tasks,
+that difference dominates: the stackless layout fits in cache, the stackful
+one does not, and resuming a fiber tends to touch a cold stack page while
+resuming a stackless coroutine pulls in a single cache line. If raw
+per-coroutine throughput on a tight inner loop is the priority, or if the
+working set is enormous, stackless is usually the right tool.
+
+cfiber narrows the gap where it can. On hosted targets, stacks grow one page
+at a time on demand (backed by a guard-page SIGSEGV handler) so an idle fiber
+costs only the pages it has actually touched. On freestanding targets, the
+user sizes a slab of fixed stacks for the worst-case workload and pays no
+heap or page-fault cost at runtime. Neither closes the gap entirely; both make
+fibers practical for the cases where their flexibility is worth it.
 
 ## Hosted example
 
