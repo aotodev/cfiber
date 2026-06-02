@@ -1,11 +1,6 @@
 #include "cfiber/fiber/fiber.h"
 
-/* assert.h is not a freestanding header; roll our own. */
-#ifdef NDEBUG
-#define ASSERT(expr) ((void)0)
-#else
-#define ASSERT(expr) ((expr) ? (void)0 : __builtin_trap())
-#endif
+#include "cfiber/core/macros.h"
 
 /**
  * @brief Calls the scheduler-defined epilogue when a fiber returns.
