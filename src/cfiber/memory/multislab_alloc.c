@@ -39,6 +39,7 @@ static slab_node_t* multislab_grow(multislab_t* ms) {
 
     node->raw_memory = mem;
     node->used_count = 0;
+    node->is_full = false;
     node->next = ms->active;
     node->prev = nullptr;
 
@@ -132,6 +133,7 @@ void* multislab_alloc(multislab_t* ms) {
             ms->full->prev = node;
         }
         ms->full = node;
+        node->is_full = true;
 
         /* grow and retry */
         if (!multislab_grow(ms)) {
@@ -154,7 +156,11 @@ void multislab_release(multislab_t* const ms, void* const ptr) {
         return;
     }
 
-    const bool was_full = (node->used_count == ms->blocks_per_slab);
+    /* Use the tracked list membership rather than inferring it from
+     * used_count: a slab can be full (used_count == blocks_per_slab) while
+     * still on the active list, because slabs migrate to the full list
+     * lazily on the next allocation. */
+    const bool was_full = node->is_full;
 
     slab_release(&node->slab, ptr);
     node->used_count--;
@@ -180,6 +186,7 @@ void multislab_release(multislab_t* const ms, void* const ptr) {
         }
 
         ms->active = node;
+        node->is_full = false;
     }
 
     /* empty: apply hysteresis */
