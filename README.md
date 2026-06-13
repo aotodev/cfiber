@@ -1,13 +1,13 @@
 # cfiber
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![x86_64](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/x86_64.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=x86_64.yml)
-[![aarch64](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/aarch64.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=aarch64.yml)
-[![cortex-m0](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m0.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m0.yml)
-[![cortex-m3](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m3.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m3.yml)
-[![cortex-m4](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m4.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m4.yml)
-[![cortex-m7](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m7.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m7.yml)
-[![fuzz](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/fuzz.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=fuzz.yml)
+[![x86_64](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/x86_64.yml/badge.svg?branch=master&label=x86_64)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=x86_64.yml)
+[![aarch64](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/aarch64.yml/badge.svg?branch=master&label=aarch64)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=aarch64.yml)
+[![cortex-m0](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m0.yml/badge.svg?branch=master&label=cortex-m0)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m0.yml)
+[![cortex-m3](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m3.yml/badge.svg?branch=master&label=cortex-m3)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m3.yml)
+[![cortex-m4](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m4.yml/badge.svg?branch=master&label=cortex-m4)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m4.yml)
+[![cortex-m7](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m7.yml/badge.svg?branch=master&label=cortex-m7)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m7.yml)
+[![fuzz](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/fuzz.yml/badge.svg?branch=master&label=fuzz)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=fuzz.yml)
 
 A C library for cooperative concurrency: stackful coroutines (fibers), a
 cooperative scheduler and stack/memory allocators tuned for both hosted Linux
