@@ -10,6 +10,7 @@
 #   -v, --verbose      Verbose build output
 #       --sanitizer    Enable the stack sanitizer (canary + watermark)
 #       --asan         Enable AddressSanitizer (hosted x86_64 only)
+#       --ubsan        Enable UndefinedBehaviorSanitizer (hosted only)
 #       --clean        Remove the previous build directory before configuring
 #   -h, --help         Show this help message
 
@@ -49,6 +50,8 @@ Usage: $(basename "$0") [options]
       --sanitizer    Enable the stack sanitizer (canary + watermark)
       --asan         Enable AddressSanitizer (hosted x86_64 only; mutually
                      exclusive with --sanitizer)
+      --ubsan        Enable UndefinedBehaviorSanitizer (hosted only; may be
+                     combined with --asan)
       --shared       Build cfiber as a shared library (default: static)
       --pic          Build the static library with -fPIC (ignored with --shared)
       --clean        Remove the previous build directory before configuring
@@ -119,6 +122,7 @@ for arg in "$@"; do
         -v|--verbose)   verbose=--verbose ;;
         --sanitizer)    stack_sanitizer=ON ;;
         --asan)         asan=ON ;;
+        --ubsan)        ubsan=ON ;;
         --shared)       build_shared=ON ;;
         --pic)          build_pic=ON ;;
         --clean)        clean_build=1 ;;
@@ -207,6 +211,19 @@ if [[ "${asan:-OFF}" == ON ]]; then
 fi
 
 # --------------------------------------------------------------------------------------
+# UndefinedBehaviorSanitizer. Hosted only (the runtime needs a libc); unlike ASan
+# it works fine under qemu-user, so it is allowed on aarch64 as well as native
+# x86_64. The arm path is bare metal where the runtime is unavailable.
+# --------------------------------------------------------------------------------------
+if [[ "${ubsan:-OFF}" == ON ]]; then
+    case "${target_arch}" in
+        x86_64|AMD64|aarch64|arm64) ;;
+        *) die "--ubsan is only supported on hosted targets (x86_64, aarch64); arm is bare metal." ;;
+    esac
+    export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
+fi
+
+# --------------------------------------------------------------------------------------
 # Build directory — one canonical path per (os, arch, cpu, config) so toggling
 # options between runs reuses the incremental build.
 # --------------------------------------------------------------------------------------
@@ -230,6 +247,7 @@ cmake -S "${project_root}" -B "${build_dir}" \
     -DBUILD_SAMPLE="${build_sample:-OFF}" \
     -DCFIBER_STACK_SANITIZER="${stack_sanitizer:-OFF}" \
     -DCFIBER_ASAN="${asan:-OFF}" \
+    -DCFIBER_UBSAN="${ubsan:-OFF}" \
     -DCFIBER_BUILD_SHARED="${build_shared:-OFF}" \
     -DCFIBER_POSITION_INDEPENDENT_CODE="${build_pic:-OFF}" \
     ${toolchain_file:+-DCMAKE_TOOLCHAIN_FILE="${toolchain_file}"} \
@@ -302,6 +320,27 @@ if [[ "${build_tests:-OFF}" == ON ]]; then
     section "running cfiber tests for ${target_arch}${target_cpu:+/${target_cpu}}"
     run_executable "tests/unit_tests_${target_arch}"
     ok "tests finished"
+
+    # Allocator tests use the default malloc-backed allocator, so they only run
+    # on hosted targets (arm is bare metal / freestanding).
+    if [[ "${target_arch}" != "arm" ]]; then
+        section "running memory allocator tests"
+        run_executable "tests/test_memory_allocators"
+        ok "memory allocator tests finished"
+
+        section "running scheduler tests"
+        run_executable "tests/test_scheduler"
+        ok "scheduler tests finished"
+
+        section "running stack module tests"
+        run_executable "tests/test_fixed_size_stack_allocator"
+        run_executable "tests/test_growable_stack"
+        ok "stack module tests finished"
+
+        section "running defensive error-path tests"
+        run_executable "tests/test_defensive"
+        ok "defensive tests finished"
+    fi
 
     if [[ "${stack_sanitizer:-OFF}" == ON && "${target_arch}" != "arm" ]]; then
         section "running stack sanitizer tests"
