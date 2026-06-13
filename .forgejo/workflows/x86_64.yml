@@ -1,0 +1,43 @@
+# Native x86_64 build + tests under the sanitizers.
+name: x86_64
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'fuzz/**'
+      - 'utils/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.forgejo/workflows/**'
+  pull_request:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: docker
+    container:
+      image: "${{ vars.CI_IMAGE }}"
+      credentials:
+        username: "${{ github.repository_owner }}"
+        password: "${{ secrets.REGISTRY_TOKEN }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: asan
+            args: "-t -d --asan"
+          - name: ubsan
+            args: "-t -d --ubsan"
+          - name: stack-sanitizer
+            args: "-t -d --sanitizer"
+    name: "x86_64 (${{ matrix.name }})"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run tests
+        run: ./utils/make.sh ${{ matrix.args }}

@@ -1,7 +1,13 @@
 # cfiber
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![CI](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/ci.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=ci.yml)
+[![x86_64](https://img.shields.io/gitea/actions/workflow/status/vernizzi/cfiber/x86_64.yml?gitea_url=https://git.vernizzi.io&branch=master&label=x86_64)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=x86_64.yml)
+[![aarch64](https://img.shields.io/gitea/actions/workflow/status/vernizzi/cfiber/aarch64.yml?gitea_url=https://git.vernizzi.io&branch=master&label=aarch64)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=aarch64.yml)
+[![cortex-m0](https://img.shields.io/gitea/actions/workflow/status/vernizzi/cfiber/cortex-m0.yml?gitea_url=https://git.vernizzi.io&branch=master&label=cortex-m0)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m0.yml)
+[![cortex-m3](https://img.shields.io/gitea/actions/workflow/status/vernizzi/cfiber/cortex-m3.yml?gitea_url=https://git.vernizzi.io&branch=master&label=cortex-m3)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m3.yml)
+[![cortex-m4](https://img.shields.io/gitea/actions/workflow/status/vernizzi/cfiber/cortex-m4.yml?gitea_url=https://git.vernizzi.io&branch=master&label=cortex-m4)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m4.yml)
+[![cortex-m7](https://img.shields.io/gitea/actions/workflow/status/vernizzi/cfiber/cortex-m7.yml?gitea_url=https://git.vernizzi.io&branch=master&label=cortex-m7)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m7.yml)
+[![fuzz](https://img.shields.io/gitea/actions/workflow/status/vernizzi/cfiber/fuzz.yml?gitea_url=https://git.vernizzi.io&branch=master&label=fuzz)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=fuzz.yml)
 
 A C library for cooperative concurrency: stackful coroutines (fibers), a
 cooperative scheduler and stack/memory allocators tuned for both hosted Linux

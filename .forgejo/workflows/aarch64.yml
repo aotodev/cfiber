@@ -1,0 +1,32 @@
+# AArch64 build + tests via the aarch64 cross toolchain, run under qemu-user.
+name: aarch64
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'fuzz/**'
+      - 'utils/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.forgejo/workflows/**'
+  pull_request:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: docker
+    container:
+      image: "${{ vars.CI_IMAGE }}"
+      credentials:
+        username: "${{ github.repository_owner }}"
+        password: "${{ secrets.REGISTRY_TOKEN }}"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run tests
+        run: ./utils/make.sh -t --arch=aarch64
