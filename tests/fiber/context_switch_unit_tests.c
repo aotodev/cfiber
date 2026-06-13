@@ -53,8 +53,7 @@ void intermediary_function(void* userData) {
 }
 
 int main() {
-    printf("\n" BLUE_BOLD "Starting context switch test\n" NC);
-    printf("--------------------------------------------------------------------------------------\n");
+    cfiber_test_suite_begin("context switch / register preservation");
 
     fiber_t test_fiber;
     fiber_t intermediary_fiber;
@@ -88,4 +87,6 @@ int main() {
     /* Clean up. */
     cleanup_fiber(&test_fiber);
     cleanup_fiber(&intermediary_fiber);
+
+    return cfiber_test_report();
 }
