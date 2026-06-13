@@ -3,10 +3,7 @@
 # cfiber only needs a C23 compiler, but it also cross-builds to AArch64 and
 # bare-metal ARM Cortex-M and runs those under QEMU. This image bundles the
 # native compilers, the cross toolchains, and QEMU so utils/make.sh runs
-# unchanged. Build once and push to your registry; the test workflow only pulls.
-#
-#   docker build -t <registry>/<owner>/cfiber-ci:latest ci/
-#   docker push  <registry>/<owner>/cfiber-ci:latest
+# unchanged.
 FROM archlinux:latest
 
 RUN pacman -Syu --noconfirm \
