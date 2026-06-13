@@ -49,6 +49,8 @@ Thumbs.db
 
 # Debugger / crash dumps
 .gdb_history
-core
+# Anchor to the repo root so this only matches a top-level core dump, not the
+# include/cfiber/core/ source directory.
+/core
 core.*
 vgcore.*
