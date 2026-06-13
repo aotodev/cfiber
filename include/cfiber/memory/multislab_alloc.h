@@ -27,6 +27,10 @@ typedef struct slab_node {
     struct slab_node* prev;
     /** Fast "is full?" / "is empty?" check. */
     uint32_t used_count;
+    /** Which list the node currently lives in (true = full list).
+     *  Tracked explicitly because a slab can be full while still on the
+     *  active list (slabs are moved to the full list lazily). */
+    bool is_full;
     /** Pointer to the slab's backing memory (so it can be freed). */
     void* raw_memory;
 } slab_node_t;
