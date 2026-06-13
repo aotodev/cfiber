@@ -17,6 +17,8 @@ option(BUILD_SAMPLE                     "Build sample scheduler"                
 option(BUILD_TESTS                      "Build unit tests"                                   OFF)
 option(CFIBER_STACK_SANITIZER           "Enable stack canary + watermark for non-MMU stacks" OFF)
 option(CFIBER_ASAN                      "Build with AddressSanitizer + fiber-aware instrumentation (hosted only)" OFF)
+option(CFIBER_UBSAN                     "Build with UndefinedBehaviorSanitizer (hosted only; combinable with CFIBER_ASAN)" OFF)
+option(CFIBER_FUZZ                      "Build libFuzzer fuzz targets under ASan + UBSan (Clang + hosted only)" OFF)
 
 set(CFIBER_ASAN_REDZONE "" CACHE STRING
     "Size in bytes of the poisoned guard below each fiber stack (default: one cache line). Only used when CFIBER_ASAN is ON.")
@@ -167,6 +169,64 @@ if(CFIBER_ASAN)
 endif()
 
 # ---------------------------------------------------------------------------------------
+# UndefinedBehaviorSanitizer (hosted). Catches a different bug class than ASan
+# (alignment, signed overflow, bad shifts, invalid enum/bool loads, pointer
+# arithmetic UB) and composes with it. -fno-sanitize-recover makes findings abort
+# rather than merely log, so tests/CI fail on the first violation.
+# ---------------------------------------------------------------------------------------
+if(CFIBER_UBSAN)
+    if(CFIBER_FREESTANDING)
+        message(FATAL_ERROR
+            "CFIBER_UBSAN requires a hosted target; the UBSan runtime is unavailable on "
+            "bare-metal Cortex-M.")
+    endif()
+    if(CFIBER_FUZZ)
+        message(FATAL_ERROR
+            "CFIBER_FUZZ already enables UndefinedBehaviorSanitizer; do not set CFIBER_UBSAN too.")
+    endif()
+
+    target_compile_options(cfiber PUBLIC
+        $<$<COMPILE_LANGUAGE:C,ASM>:-fsanitize=undefined>
+        $<$<COMPILE_LANGUAGE:C>:-fno-sanitize-recover=undefined>
+        $<$<COMPILE_LANGUAGE:C>:-fno-omit-frame-pointer>
+    )
+    target_link_options(cfiber PUBLIC -fsanitize=undefined)
+endif()
+
+# ---------------------------------------------------------------------------------------
+# Fuzzing (libFuzzer). Instruments the library for coverage-guided fuzzing and
+# runs it under AddressSanitizer + UndefinedBehaviorSanitizer. Because
+# -fsanitize=address is on, the fiber-aware ASan redzone/switch logic in
+# cfiber/debug/asan.h activates automatically — the scheduler fuzzer inherits it.
+# ---------------------------------------------------------------------------------------
+if(CFIBER_FUZZ)
+    if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR
+            "CFIBER_FUZZ requires Clang (libFuzzer). Re-configure with -DCMAKE_C_COMPILER=clang.")
+    endif()
+    if(CFIBER_FREESTANDING)
+        message(FATAL_ERROR "CFIBER_FUZZ requires a hosted target; libFuzzer is not available bare-metal.")
+    endif()
+    if(CFIBER_ASAN OR CFIBER_STACK_SANITIZER)
+        message(FATAL_ERROR
+            "CFIBER_FUZZ already enables AddressSanitizer; do not combine it with "
+            "CFIBER_ASAN or CFIBER_STACK_SANITIZER.")
+    endif()
+
+    # fuzzer-no-link adds SanitizerCoverage to the library without pulling in the
+    # libFuzzer entry point; the fuzz executables add -fsanitize=fuzzer for that.
+    # -fno-sanitize-recover=undefined makes UBSan findings abort (libFuzzer treats
+    # the abort as a crash) instead of merely logging.
+    target_compile_options(cfiber PUBLIC
+        $<$<COMPILE_LANGUAGE:C,ASM>:-fsanitize=address>
+        $<$<COMPILE_LANGUAGE:C>:-fsanitize=undefined,fuzzer-no-link>
+        $<$<COMPILE_LANGUAGE:C>:-fno-sanitize-recover=undefined>
+        $<$<COMPILE_LANGUAGE:C>:-fno-omit-frame-pointer>
+    )
+    target_link_options(cfiber PUBLIC -fsanitize=address,undefined)
+endif()
+
+# ---------------------------------------------------------------------------------------
 # Architecture-specific assembly + ABI flags
 # ---------------------------------------------------------------------------------------
 if(CFIBER_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
@@ -233,5 +293,10 @@ if(BUILD_SAMPLE)
 endif()
 
 if(BUILD_TESTS)
+    enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(CFIBER_FUZZ)
+    add_subdirectory(fuzz)
 endif()
