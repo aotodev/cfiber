@@ -1,0 +1,28 @@
+# Toolchain image for cfiber CI.
+#
+# cfiber only needs a C23 compiler, but it also cross-builds to AArch64 and
+# bare-metal ARM Cortex-M and runs those under QEMU. This image bundles the
+# native compilers, the cross toolchains, and QEMU so utils/make.sh runs
+# unchanged. Build once and push to your registry; the test workflow only pulls.
+#
+#   docker build -t <registry>/<owner>/cfiber-ci:latest ci/
+#   docker push  <registry>/<owner>/cfiber-ci:latest
+FROM archlinux:latest
+
+RUN pacman -Syu --noconfirm \
+        clang llvm gcc \
+        cmake ninja make \
+        git nodejs \
+        qemu-user qemu-system-arm \
+        aarch64-linux-gnu-gcc aarch64-linux-gnu-glibc \
+        arm-none-eabi-gcc arm-none-eabi-newlib \
+    && pacman -Scc --noconfirm
+
+# qemu-user      provides qemu-aarch64 (user-mode) for the AArch64 tests.
+# qemu-system-arm runs the Cortex-M bare-metal tests.
+# aarch64-linux-gnu-gcc / arm-none-eabi-* are the cross toolchains make.sh uses.
+# aarch64-linux-gnu-glibc: target libc + dynamic loader (ld-linux-aarch64.so.1),
+#   needed both to link the AArch64 test binary and for `qemu-aarch64 -L` to run
+#   it (make.sh falls back to /usr/aarch64-linux-gnu, where this package lands).
+# make: utils/make.sh drives cmake with the default (Makefiles) generator.
+# nodejs: required by JS-based actions (actions/checkout).
