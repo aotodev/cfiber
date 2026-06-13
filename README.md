@@ -1,6 +1,7 @@
 # cfiber
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/ci.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=ci.yml)
 
 A C library for cooperative concurrency: stackful coroutines (fibers), a
 cooperative scheduler and stack/memory allocators tuned for both hosted Linux
