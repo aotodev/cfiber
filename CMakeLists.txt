@@ -261,20 +261,22 @@ elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
         message(FATAL_ERROR "Unsupported or unset CFIBER_TARGET_CPU: '${CFIBER_TARGET_CPU}'")
     endif()
 
-    # ABI-affecting flags must be visible to every translation unit (including
-    # assembly), so they go on add_compile_options. They also need to be on the
-    # link line for libgcc selection.
+    # ABI/arch-affecting flags must reach every translation unit (including
+    # assembly) and the link line (libgcc multilib selection).
     if(CFIBER_ARM_FLOAT_ABI)
         add_compile_options(-mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
         add_link_options(-mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
+        target_compile_options(cfiber PRIVATE -mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
         if(CFIBER_ARM_FLOAT_ABI STREQUAL "hard")
             target_compile_definitions(cfiber PUBLIC CFIBER_ARM_FPU)
+            add_compile_definitions(CFIBER_ARM_FPU)
         endif()
     endif()
 
     if(CFIBER_ARM_FPU)
         add_compile_options(-mfpu=${CFIBER_ARM_FPU})
         add_link_options(-mfpu=${CFIBER_ARM_FPU})
+        target_compile_options(cfiber PRIVATE -mfpu=${CFIBER_ARM_FPU})
     endif()
 else()
     message(FATAL_ERROR "Unsupported architecture: '${CFIBER_SYSTEM_PROCESSOR}'")
@@ -283,6 +285,7 @@ endif()
 if(CFIBER_TARGET_CPU)
     add_compile_options(-mcpu=${CFIBER_TARGET_CPU})
     add_link_options(-mcpu=${CFIBER_TARGET_CPU})
+    target_compile_options(cfiber PRIVATE -mcpu=${CFIBER_TARGET_CPU})
 endif()
 
 # ---------------------------------------------------------------------------------------
