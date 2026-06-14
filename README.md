@@ -76,6 +76,7 @@ A convenience script handles native and cross builds plus QEMU execution:
 ./utils/make.sh -t -s                              # native, tests + sample
 ./utils/make.sh -t -s --sanitizer                  # with stack sanitizer (canary)
 ./utils/make.sh -t -s --asan                       # with AddressSanitizer (x86_64)
+./utils/make.sh -t -s --ubsan                      # with UndefinedBehaviorSanitizer
 ./utils/make.sh -t -s -d                           # Debug build
 ./utils/make.sh -t -s --shared                     # shared library
 ./utils/make.sh -t -s --pic                        # static + PIC
@@ -94,6 +95,8 @@ A convenience script handles native and cross builds plus QEMU execution:
 | `CFIBER_STACK_SANITIZER`            | `OFF`   | Enable canary + watermark instrumentation                    |
 | `CFIBER_ASAN`                       | `OFF`   | Build with AddressSanitizer + fiber-aware instrumentation (hosted only; excludes `CFIBER_STACK_SANITIZER`) |
 | `CFIBER_ASAN_REDZONE`               | —       | Guard size in bytes below each fiber stack (default: one cache line). Only used with `CFIBER_ASAN` |
+| `CFIBER_UBSAN`                      | `OFF`   | Build with UndefinedBehaviorSanitizer; aborts on the first finding (hosted only; combinable with `CFIBER_ASAN`) |
+| `CFIBER_FUZZ`                       | `OFF`   | Build the libFuzzer targets under ASan + UBSan (Clang + hosted only)        |
 | `CFIBER_BUILD_SHARED`               | `OFF`   | Build as a shared library (`libcfiber.so`) instead of static |
 | `CFIBER_POSITION_INDEPENDENT_CODE`  | `OFF`   | Build the static library with `-fPIC` (ignored when shared)  |
 | `CFIBER_TARGET_CPU`                 | —       | `cortex-m0` / `cortex-m3` / `cortex-m4` / `cortex-m7`        |
@@ -130,10 +133,46 @@ add_subdirectory(external/cfiber)
 target_link_libraries(my_app PRIVATE cfiber)
 ```
 
+## Testing
+
+Every push runs the matrix in CI (the badges above): native x86_64 under
+AddressSanitizer, UndefinedBehaviorSanitizer, and the canary/watermark stack
+sanitizer; AArch64 under `qemu-user`; and bare-metal Cortex-M0/M3/M4/M7 under
+`qemu-system-arm`. Run the suites locally with `ctest --test-dir build` (native)
+or `./utils/make.sh -t ...` (any target, including the QEMU flows).
+
+What is covered:
+
+- **Context switching**: per-architecture register-preservation tests for the
+  callee-saved set (plus S16–S31 on Cortex-M7F).
+- **Allocators**: slab and multislab: exhaustion, release/reuse, lazy growth,
+  `max_slabs` caps, full/active list transitions, empty-slab hysteresis, and
+  (via a counting backing allocator) that `destroy` returns every byte.
+- **Scheduler**: spawn / yield / completion ordering, dynamic spawning,
+  capacity exhaustion, and leak balance across spawn/free churn.
+- **Stacks**: fixed-size and growable allocators, guard-page faulting, and the
+  canary/watermark sanitizer.
+- **Defensive paths**: bad init parameters, double-free, and foreign-pointer
+  release (built with `-DNDEBUG` so the guards return errors instead of trapping).
+
+Beyond the unit tests, the project leans on:
+
+- **AddressSanitizer + UndefinedBehaviorSanitizer** on hosted builds
+  (`CFIBER_ASAN`, `CFIBER_UBSAN`).
+- **Canary + watermark** stack instrumentation for the no-MMU bare-metal targets
+  (`CFIBER_STACK_SANITIZER`), the freestanding counterpart to ASan.
+- **Coverage-guided fuzzing** (libFuzzer, `CFIBER_FUZZ`, Clang) of the allocator
+  and scheduler under ASan + UBSan. CI runs a short, time-boxed smoke pass; the
+  same targets can be run longer locally against a persisted corpus; see
+  [fuzz/README.md](fuzz/README.md).
+
+This is a young library, so treat it accordingly: the above is what is exercised
+today, not a guarantee of exhaustive coverage.
+
 ## Stackful vs stackless coroutines
 
 A stackful coroutine owns a real call stack. It can yield from any point in any
-function it calls — including from deep inside a third-party library — and the
+function it calls, including from deep inside a third-party library, and the
 caller's frames are paused as a whole.
 
 A stackless coroutine is a compiler-rewritten state machine. It can only
@@ -153,7 +192,7 @@ caller is none the wiser.
 
 That flexibility is not free, and stackless coroutines remain the better fit
 for some workloads. A stackless coroutine's saved state is a small,
-compiler-known struct — often well under 100 bytes — packed contiguously with
+compiler-known struct, often well under 100 bytes, packed contiguously with
 its siblings. A fiber, by contrast, owns a full stack: at minimum one page,
 typically several. At the scale of hundreds of thousands of concurrent tasks,
 that difference dominates: the stackless layout fits in cache, the stackful
@@ -271,9 +310,9 @@ int main(void) {
 
 The freestanding build is selected automatically when the target architecture
 is `arm`. In that mode the public macro `CFIBER_FREESTANDING=1` is defined and
-the growable-stack sources are excluded. Everything else — including the
+the growable-stack sources are excluded. Everything else, including the
 fixed-size stack allocator at [include/cfiber/stack/fixed_size_stack_allocator.h](include/cfiber/stack/fixed_size_stack_allocator.h)
-and the sanitizer — is available.
+and the sanitizer, is available.
 
 If a scheduler is not desired, fibers can be driven directly with `init_fiber`
 and `switch_context` and the user supplies their own `scheduler_return_fiber`
@@ -304,7 +343,7 @@ ASAN_OPTIONS=detect_stack_use_after_return=1 ctest --test-dir build
 
 This is the hosted counterpart to `CFIBER_STACK_SANITIZER` (canary + watermark),
 which targets freestanding / non-MMU builds where ASan is unavailable. The two
-are mutually exclusive — the canary word would land inside the ASan redzone — so
+are mutually exclusive, the canary word would land inside the ASan redzone, so
 enabling both is rejected at configure time. AddressSanitizer is not usable
 under `qemu-user`, so the AArch64 cross/QEMU flow does not support it; use a
 native build.
@@ -316,20 +355,20 @@ independent of the built-in scheduler, so a custom driver can adopt it. Every
 entry point compiles to nothing when ASan is disabled, so calls can be left
 unconditionally in place.
 
-- `cfiber_asan_poison(addr, size)` / `cfiber_asan_unpoison(addr, size)` — manage
+- `cfiber_asan_poison(addr, size)` / `cfiber_asan_unpoison(addr, size)`: manage
   a guard region; poison `CFIBER_ASAN_REDZONE` bytes below each usable stack on
   allocation and unpoison on release.
-- `cfiber_asan_switch(from, to, to_stack_low, to_stack_size, finishing)` —
+- `cfiber_asan_switch(from, to, to_stack_low, to_stack_size, finishing)`:
   replaces `switch_context`. Pass the target stack's low address and size, and
   `finishing = true` only when the outgoing fiber is terminating (so its fake
   stack is discarded rather than saved for a resume that never comes).
-- `cfiber_asan_on_fiber_entry()` — call once at the very top of a freshly
+- `cfiber_asan_on_fiber_entry()`: call once at the very top of a freshly
   started fiber, before its entry function, to complete the switch ASan was told
   about when the fiber was first scheduled. The built-in driver does this from
   its assembly prologue; a custom prologue must do the same.
 
 The protocol is: the party leaving a stack issues the `start` (inside
-`cfiber_asan_switch`), and the party arriving issues the `finish` — either from
+`cfiber_asan_switch`), and the party arriving issues the `finish`, either from
 `cfiber_asan_switch` when resuming a suspended fiber, or from
 `cfiber_asan_on_fiber_entry` when entering a fresh one.
 
@@ -348,13 +387,20 @@ src/cfiber/    matching implementation files; per-arch assembly under fiber/
 sample/        example using the built-in scheduler
 tests/
   fiber/       register-preservation tests, one per architecture
-  stack/       sanitizer tests
+  memory/      slab + multislab allocator tests
+  scheduler/   scheduler tests
+  stack/       fixed-size + growable stack tests, canary/watermark sanitizer
+  defensive/   misuse / error-path tests (built with NDEBUG)
+  test/        the minimal test framework (test.h + test.c)
+fuzz/          libFuzzer harnesses for the allocator and scheduler
 utils/
   make.sh      build + run convenience script
   cortex/      startup code and linker scripts for QEMU Cortex-M targets
 cmake/         toolchain files and helpers
+ci/            Containerfile for the CI toolchain image
+.forgejo/      per-target CI workflows
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
