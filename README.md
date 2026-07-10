@@ -23,6 +23,11 @@ context switches.
   (Thumb-1 and Thumb-2). Optional FPU save/restore on Cortex-M4F/M7F.
 - Cooperative FCFS scheduler with dynamic spawn; no compile-time fiber-count
   cap.
+- Optional epoll(7) reactor for Linux hosts (`CFIBER_REACTOR`): an alternative
+  scheduler that multiplexes many fibers on one thread, parking a fiber on a
+  non-blocking descriptor and resuming it when the descriptor is ready, a
+  deadline elapses, or it is cancelled. Ships with a WebSocket (RFC 6455) echo
+  server example ([examples/ws_echo](examples/ws_echo)).
 - Slab and multislab fixed-size allocators usable without `malloc`.
 - Growable hosted stacks: `mmap` + `PROT_NONE` guard page + SIGSEGV-driven
   growth, with a pool that recycles `MADV_DONTNEED` pages on release.
