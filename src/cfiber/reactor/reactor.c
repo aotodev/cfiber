@@ -900,10 +900,16 @@ cfiber_reactor_t* cfiber_reactor_create(cfiber_reactor_config_t config) {
         maxs = page;
     }
 
-    cfiber_reactor_t* s = calloc(1, sizeof *s);
+    /* The reactor embeds a cache-line-aligned command ring, so the struct is
+     * over-aligned; calloc only guarantees max_align_t. Allocate at the struct's
+     * real alignment (aligned_alloc needs a size that is a multiple of it) and
+     * zero it. Still released with free(). */
+    size_t rsz = align_up(sizeof(cfiber_reactor_t), _Alignof(cfiber_reactor_t));
+    cfiber_reactor_t* s = aligned_alloc(_Alignof(cfiber_reactor_t), rsz);
     if (!s) {
         return nullptr;
     }
+    memset(s, 0, sizeof *s);
     s->epfd = -1;
     s->evfd = -1;
 
