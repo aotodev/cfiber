@@ -7,6 +7,7 @@
 [![cortex-m3](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m3.yml/badge.svg?branch=master&label=cortex-m3)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m3.yml)
 [![cortex-m4](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m4.yml/badge.svg?branch=master&label=cortex-m4)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m4.yml)
 [![cortex-m7](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m7.yml/badge.svg?branch=master&label=cortex-m7)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m7.yml)
+[![reactor](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/reactor.yml/badge.svg?branch=master&label=reactor)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=reactor.yml)
 [![fuzz](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/fuzz.yml/badge.svg?branch=master&label=fuzz)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=fuzz.yml)
 
 A C library for cooperative concurrency: stackful coroutines (fibers), a
