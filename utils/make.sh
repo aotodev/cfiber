@@ -5,12 +5,14 @@
 #   -a, --arch=<arch>  Target architecture (x86_64, aarch64, arm)
 #   -c, --cpu=<cpu>    Target CPU (cortex-m0, cortex-m3, cortex-m4, cortex-m7)
 #   -d, --debug        Build in Debug mode (default: Release)
-#   -s, --samples      Build the sample
+#   -e, --examples     Build (and run) the examples
 #   -t, --tests        Build and run unit tests
 #   -v, --verbose      Verbose build output
 #       --sanitizer    Enable the stack sanitizer (canary + watermark)
 #       --asan         Enable AddressSanitizer (hosted x86_64 only)
 #       --ubsan        Enable UndefinedBehaviorSanitizer (hosted only)
+#       --tsan         Enable ThreadSanitizer (hosted x86_64 only; excludes --asan)
+#       --reactor      Build + test the optional epoll reactor (Linux only)
 #       --clean        Remove the previous build directory before configuring
 #   -h, --help         Show this help message
 
@@ -44,7 +46,7 @@ Usage: $(basename "$0") [options]
   -a, --arch=<arch>  Target architecture (x86_64, aarch64, arm)
   -c, --cpu=<cpu>    Target CPU (cortex-m0, cortex-m3, cortex-m4, cortex-m7)
   -d, --debug        Build in Debug mode (default: Release)
-  -s, --samples      Build the sample
+  -e, --examples     Build (and run) the examples
   -t, --tests        Build and run unit tests
   -v, --verbose      Verbose build output
       --sanitizer    Enable the stack sanitizer (canary + watermark)
@@ -52,8 +54,11 @@ Usage: $(basename "$0") [options]
                      exclusive with --sanitizer)
       --ubsan        Enable UndefinedBehaviorSanitizer (hosted only; may be
                      combined with --asan)
+      --tsan         Enable ThreadSanitizer (hosted x86_64 only; mutually
+                     exclusive with --asan; for the reactor's concurrency)
       --shared       Build cfiber as a shared library (default: static)
       --pic          Build the static library with -fPIC (ignored with --shared)
+      --reactor      Build and test the optional epoll(7) reactor (Linux only)
       --clean        Remove the previous build directory before configuring
   -h, --help         Show this help message
 EOF
@@ -117,14 +122,16 @@ for arg in "$@"; do
         -a=*|--arch=*)  target_arch="${arg#*=}" ;;
         -c=*|--cpu=*)   target_cpu="${arg#*=}" ;;
         -d|--debug)     build_type=Debug ;;
-        -s|--samples)   build_sample=ON ;;
+        -e|--examples)  build_examples=ON ;;
         -t|--tests)     build_tests=ON ;;
         -v|--verbose)   verbose=--verbose ;;
         --sanitizer)    stack_sanitizer=ON ;;
         --asan)         asan=ON ;;
         --ubsan)        ubsan=ON ;;
+        --tsan)         tsan=ON ;;
         --shared)       build_shared=ON ;;
         --pic)          build_pic=ON ;;
+        --reactor)      reactor=ON ;;
         --clean)        clean_build=1 ;;
         -h|--help)      ;;
         -*)             usage >&2; die "unknown option: '${arg}'" ;;
@@ -224,7 +231,34 @@ if [[ "${ubsan:-OFF}" == ON ]]; then
 fi
 
 # --------------------------------------------------------------------------------------
-# Build directory — one canonical path per (os, arch, cpu, config) so toggling
+# ThreadSanitizer. Data-race detector, primarily for the reactor's lock-free
+# command ring and cross-thread wake/cancel. Like ASan it needs native x86_64
+# (qemu-user does not support it) and cannot be combined with ASan.
+# --------------------------------------------------------------------------------------
+if [[ "${tsan:-OFF}" == ON ]]; then
+    if [[ "${asan:-OFF}" == ON ]]; then
+        die "--tsan and --asan are mutually exclusive (incompatible sanitizer runtimes)."
+    fi
+    case "${target_arch}" in
+        x86_64|AMD64) ;;
+        *) die "--tsan is only supported on native x86_64 (qemu-user does not support ThreadSanitizer)." ;;
+    esac
+    export TSAN_OPTIONS="${TSAN_OPTIONS:-halt_on_error=1:second_deadlock_stack=1}"
+fi
+
+# --------------------------------------------------------------------------------------
+# Reactor. Linux-only (epoll/eventfd); excluded on the bare-metal arm target. It
+# works under qemu-user, so aarch64 is allowed alongside native x86_64.
+# --------------------------------------------------------------------------------------
+if [[ "${reactor:-OFF}" == ON ]]; then
+    case "${target_arch}" in
+        x86_64|AMD64|aarch64|arm64) ;;
+        *) die "--reactor is Linux only (epoll/eventfd); the arm target is bare metal." ;;
+    esac
+fi
+
+# --------------------------------------------------------------------------------------
+# Build directory: one canonical path per (os, arch, cpu, config) so toggling
 # options between runs reuses the incremental build.
 # --------------------------------------------------------------------------------------
 build_dir="build/${host_os}/${target_arch}${target_cpu:+/${target_cpu}}/${build_type}"
@@ -244,12 +278,14 @@ section "cfiber for ${target_arch}${target_cpu:+/${target_cpu}} (${build_type})"
 cmake -S "${project_root}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE="${build_type}" \
     -DBUILD_TESTS="${build_tests:-OFF}" \
-    -DBUILD_SAMPLE="${build_sample:-OFF}" \
+    -DCFIBER_BUILD_EXAMPLES="${build_examples:-OFF}" \
     -DCFIBER_STACK_SANITIZER="${stack_sanitizer:-OFF}" \
     -DCFIBER_ASAN="${asan:-OFF}" \
     -DCFIBER_UBSAN="${ubsan:-OFF}" \
+    -DCFIBER_TSAN="${tsan:-OFF}" \
     -DCFIBER_BUILD_SHARED="${build_shared:-OFF}" \
     -DCFIBER_POSITION_INDEPENDENT_CODE="${build_pic:-OFF}" \
+    -DCFIBER_REACTOR="${reactor:-OFF}" \
     ${toolchain_file:+-DCMAKE_TOOLCHAIN_FILE="${toolchain_file}"} \
     ${target_cpu:+-DCFIBER_TARGET_CPU="${target_cpu}"} \
     ${float_abi:+-DCFIBER_ARM_FLOAT_ABI="${float_abi}"} \
@@ -308,12 +344,12 @@ run_executable() {
 }
 
 # --------------------------------------------------------------------------------------
-# Post-build: run sample / tests
+# Post-build: run examples / tests
 # --------------------------------------------------------------------------------------
-if [[ "${build_sample:-OFF}" == ON ]]; then
-    section "running sample for ${target_arch}${target_cpu:+/${target_cpu}}"
-    run_executable sample/runtime_example
-    ok "sample finished"
+if [[ "${build_examples:-OFF}" == ON ]]; then
+    section "running scheduler example for ${target_arch}${target_cpu:+/${target_cpu}}"
+    run_executable examples/scheduler/runtime_example
+    ok "scheduler example finished"
 fi
 
 if [[ "${build_tests:-OFF}" == ON ]]; then
@@ -346,5 +382,15 @@ if [[ "${build_tests:-OFF}" == ON ]]; then
         section "running stack sanitizer tests"
         run_executable "tests/test_stack_sanitizer"
         ok "stack sanitizer tests finished"
+    fi
+
+    if [[ "${reactor:-OFF}" == ON && "${target_arch}" != "arm" ]]; then
+        section "running reactor tests"
+        run_executable "tests/test_reactor"
+        ok "reactor tests finished"
+
+        section "running WebSocket echo example self-test"
+        run_executable "examples/ws_echo/ws_selftest"
+        ok "WebSocket echo self-test finished"
     fi
 fi

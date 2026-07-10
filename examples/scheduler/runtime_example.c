@@ -61,7 +61,7 @@ void fiber_function(void* data) {
 /* ------------------------------------------------------------------ */
 
 int main(void) {
-    printf("=== STARTING SIMPLE FIBER SAMPLE ===\n");
+    printf("=== STARTING SIMPLE FIBER EXAMPLE ===\n");
 
     cfiber_scheduler_t sched;
     cfiber_scheduler_config_t config = {
@@ -86,6 +86,6 @@ int main(void) {
 
     cfiber_scheduler_destroy(&sched);
 
-    printf("=== SIMPLE FIBER SAMPLE COMPLETED ===\n");
+    printf("=== SIMPLE FIBER EXAMPLE COMPLETED ===\n");
     return 0;
 }

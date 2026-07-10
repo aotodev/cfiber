@@ -118,6 +118,19 @@ if(NOT CFIBER_FREESTANDING)
 endif()
 
 # ======================================================================================
+# Reactor tests (Linux-only; requires the optional epoll reactor)
+# ======================================================================================
+if(CFIBER_REACTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_reactor reactor/test_reactor.c)
+    target_include_directories(test_reactor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(test_reactor PRIVATE cfiber_reactor cfiber_test project_flags)
+
+    if(_cfiber_register_ctest)
+        add_test(NAME reactor COMMAND test_reactor)
+    endif()
+endif()
+
+# ======================================================================================
 # Stack sanitizer tests (hosted-only, requires the canary/watermark sanitizer)
 # ======================================================================================
 if(NOT CFIBER_FREESTANDING AND CFIBER_STACK_SANITIZER)

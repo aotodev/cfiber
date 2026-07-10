@@ -13,12 +13,14 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
-option(BUILD_SAMPLE                     "Build sample scheduler"                             OFF)
+option(CFIBER_BUILD_EXAMPLES            "Build the standalone examples"                      OFF)
 option(BUILD_TESTS                      "Build unit tests"                                   OFF)
 option(CFIBER_STACK_SANITIZER           "Enable stack canary + watermark for non-MMU stacks" OFF)
 option(CFIBER_ASAN                      "Build with AddressSanitizer + fiber-aware instrumentation (hosted only)" OFF)
 option(CFIBER_UBSAN                     "Build with UndefinedBehaviorSanitizer (hosted only; combinable with CFIBER_ASAN)" OFF)
+option(CFIBER_TSAN                      "Build with ThreadSanitizer (hosted only; for the reactor's concurrency; excludes CFIBER_ASAN)" OFF)
 option(CFIBER_FUZZ                      "Build libFuzzer fuzz targets under ASan + UBSan (Clang + hosted only)" OFF)
+option(CFIBER_REACTOR                   "Build the optional epoll(7) reactor scheduler (Linux only)" OFF)
 
 set(CFIBER_ASAN_REDZONE "" CACHE STRING
     "Size in bytes of the poisoned guard below each fiber stack (default: one cache line). Only used when CFIBER_ASAN is ON.")
@@ -57,7 +59,7 @@ if(CCACHE_PROGRAM)
 endif()
 
 # ---------------------------------------------------------------------------------------
-# project_flags — shared compiler / linker flags consumed by every target
+# project_flags: shared compiler / linker flags consumed by every target
 # ---------------------------------------------------------------------------------------
 add_library(project_flags INTERFACE)
 
@@ -138,7 +140,7 @@ endif()
 # AddressSanitizer (hosted only). The hosted counterpart to the canary/watermark
 # sanitizer above: poisons a guard below each fiber stack and keeps ASan in sync
 # across context switches. Flags are PUBLIC so consumers of the static library
-# also build/link against ASan (mandatory — a partially-instrumented program
+# also build/link against ASan (mandatory; a partially-instrumented program
 # misbehaves at link/run time).
 # ---------------------------------------------------------------------------------------
 if(CFIBER_ASAN)
@@ -194,10 +196,44 @@ if(CFIBER_UBSAN)
 endif()
 
 # ---------------------------------------------------------------------------------------
+# ThreadSanitizer (hosted). Data-race detector for the reactor's concurrency:
+# the lock-free command ring and cross-thread wake/cancel. Scoped to the reactor
+# library (see the CFIBER_REACTOR block), NOT applied library-wide: TSan cannot
+# be combined with the raw register-preservation tests (its instrumentation uses
+# the very callee-saved registers those tests poke), and the mechanism core is
+# single-threaded anyway. TSan and ASan share shadow-memory machinery and cannot
+# coexist; it also does not run under qemu-user, so like ASan it is a native-
+# x86_64 tool. Composes with UBSan. This block only validates; the flags are
+# applied to the cfiber_reactor target.
+# ---------------------------------------------------------------------------------------
+if(CFIBER_TSAN)
+    if(CFIBER_FREESTANDING)
+        message(FATAL_ERROR
+            "CFIBER_TSAN requires a hosted target; the ThreadSanitizer runtime is "
+            "unavailable on bare-metal Cortex-M.")
+    endif()
+    if(CFIBER_ASAN)
+        message(FATAL_ERROR
+            "CFIBER_TSAN and CFIBER_ASAN are mutually exclusive: the two sanitizers use "
+            "incompatible shadow-memory runtimes and cannot be linked together.")
+    endif()
+    if(CFIBER_FUZZ)
+        message(FATAL_ERROR
+            "CFIBER_FUZZ enables AddressSanitizer, which is incompatible with "
+            "ThreadSanitizer; do not combine CFIBER_TSAN with CFIBER_FUZZ.")
+    endif()
+    if(NOT CFIBER_REACTOR)
+        message(FATAL_ERROR
+            "CFIBER_TSAN targets the reactor's concurrency; enable it together with "
+            "-DCFIBER_REACTOR=ON.")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------------------
 # Fuzzing (libFuzzer). Instruments the library for coverage-guided fuzzing and
 # runs it under AddressSanitizer + UndefinedBehaviorSanitizer. Because
 # -fsanitize=address is on, the fiber-aware ASan redzone/switch logic in
-# cfiber/debug/asan.h activates automatically — the scheduler fuzzer inherits it.
+# cfiber/debug/asan.h activates automatically; the scheduler fuzzer inherits it.
 # ---------------------------------------------------------------------------------------
 if(CFIBER_FUZZ)
     if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang")
@@ -289,16 +325,69 @@ if(CFIBER_TARGET_CPU)
 endif()
 
 # ---------------------------------------------------------------------------------------
-# Optional targets
+# Optional epoll(7) reactor (Linux only). A separate, optional scheduler built on
+# cfiber's fiber + growable-stack mechanism (not the built-in FCFS scheduler). It
+# registers its fiber-return hook at run time via cfiber_set_return_hook(), so it
+# coexists with the built-in scheduler and works through the shared library too.
+# Linked against cfiber, it inherits cfiber's sanitizer usage requirements.
 # ---------------------------------------------------------------------------------------
-if(BUILD_SAMPLE)
-    add_subdirectory(sample)
+if(CFIBER_REACTOR)
+    if(CFIBER_FREESTANDING)
+        message(FATAL_ERROR
+            "CFIBER_REACTOR requires a hosted target; epoll/eventfd are unavailable on "
+            "bare-metal Cortex-M.")
+    endif()
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR
+            "CFIBER_REACTOR is Linux only (it uses epoll(7) and eventfd(2)); "
+            "current target is '${CMAKE_SYSTEM_NAME}'.")
+    endif()
+
+    find_package(Threads REQUIRED)
+
+    if(CFIBER_BUILD_SHARED)
+        add_library(cfiber_reactor SHARED)
+        set_target_properties(cfiber_reactor PROPERTIES
+            VERSION   ${PROJECT_VERSION}
+            SOVERSION ${PROJECT_VERSION_MAJOR}
+        )
+    else()
+        add_library(cfiber_reactor STATIC)
+        if(CFIBER_POSITION_INDEPENDENT_CODE)
+            set_target_properties(cfiber_reactor PROPERTIES POSITION_INDEPENDENT_CODE ON)
+        endif()
+    endif()
+
+    target_sources(cfiber_reactor PRIVATE
+        ${_cfiber_src_dir}/reactor/reactor.c
+    )
+    target_compile_definitions(cfiber_reactor PRIVATE _GNU_SOURCE)
+    target_link_libraries(cfiber_reactor PUBLIC cfiber Threads::Threads PRIVATE project_flags)
+
+    # ThreadSanitizer, scoped to the reactor and its dependents (tests, example).
+    # PUBLIC so consumers compile + link with it; the uninstrumented cfiber core
+    # links in fine (TSan simply does not track its single-threaded accesses).
+    if(CFIBER_TSAN)
+        target_compile_options(cfiber_reactor PUBLIC
+            $<$<COMPILE_LANGUAGE:C>:-fsanitize=thread>
+            $<$<COMPILE_LANGUAGE:C>:-fno-omit-frame-pointer>
+        )
+        target_link_options(cfiber_reactor PUBLIC -fsanitize=thread)
+    endif()
 endif()
 
+# ---------------------------------------------------------------------------------------
+# Optional targets
+# ---------------------------------------------------------------------------------------
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# Examples. The subdirectory gates each example internally: the scheduler
+# example on CFIBER_BUILD_EXAMPLES, the reactor's WebSocket echo on
+# CFIBER_REACTOR (its self-test doubles as the reactor's end-to-end test).
+add_subdirectory(examples)
 
 if(CFIBER_FUZZ)
     add_subdirectory(fuzz)

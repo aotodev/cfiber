@@ -1,5 +1,5 @@
-#ifndef CFIBER_SAMPLE_CONFIG_H
-#define CFIBER_SAMPLE_CONFIG_H
+#ifndef CFIBER_EXAMPLE_CONFIG_H
+#define CFIBER_EXAMPLE_CONFIG_H
 
 #ifndef FIBERS_PER_SLAB
 #ifdef __arm__
@@ -17,4 +17,4 @@
 #endif
 #endif
 
-#endif // CFIBER_SAMPLE_CONFIG_H
+#endif // CFIBER_EXAMPLE_CONFIG_H

@@ -20,3 +20,11 @@ endfunction()
 
 add_cfiber_fuzzer(fuzz_multislab)
 add_cfiber_fuzzer(fuzz_scheduler)
+
+# The reactor fuzzer additionally needs the (Linux-only) reactor library, built
+# only when CFIBER_REACTOR is enabled. It inherits the same fuzz/ASan/UBSan
+# instrumentation through its PUBLIC dependency on cfiber.
+if(CFIBER_REACTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_cfiber_fuzzer(fuzz_reactor)
+    target_link_libraries(fuzz_reactor PRIVATE cfiber_reactor)
+endif()

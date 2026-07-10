@@ -7,7 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-[[noreturn]] void scheduler_return_fiber() {
+/* These fibers never return (they switch_context away and the test ends from
+ * main), so this hook is never actually invoked. We register it anyway to
+ * exercise the cfiber_set_return_hook() API and to provide a valid hook should
+ * the contract ever change. */
+static void noop_return_hook(void* ctx) {
+    (void)ctx;
     __builtin_unreachable();
 }
 
@@ -54,6 +59,8 @@ void intermediary_function(void* userData) {
 
 int main() {
     cfiber_test_suite_begin("context switch / register preservation");
+
+    cfiber_set_return_hook(noop_return_hook, nullptr);
 
     fiber_t test_fiber;
     fiber_t intermediary_fiber;

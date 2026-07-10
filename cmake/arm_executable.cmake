@@ -21,7 +21,7 @@ function(add_arm_executable name)
         message(FATAL_ERROR "Unsupported CPU: ${CFIBER_TARGET_CPU}")
     endif()
 
-    # Shared between tests and samples — create once.
+    # Shared between tests and examples; create once.
     if(NOT TARGET cfiber_cortex_syscalls)
         add_library(cfiber_cortex_syscalls OBJECT ${_cortex_dir}/syscalls.c)
     endif()

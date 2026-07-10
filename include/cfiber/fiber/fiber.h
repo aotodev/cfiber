@@ -15,7 +15,8 @@
  *   2. Create a fiber_t structure and set stack/stack_size.
  *   3. Call init_fiber() with your fiber function and user data.
  *   4. Use switch_context() to switch between fibers.
- *   5. Implement scheduler_return_fiber() to handle fiber completion.
+ *   5. Register a fiber-return hook with cfiber_set_return_hook() to handle
+ *      fiber completion.
  *
  * @section example Example
  * @code
@@ -89,8 +90,8 @@ typedef struct {
  *
  * @details The fiber function receives a single void pointer argument which can
  *          point to any user-defined data structure. The fiber runs until this
- *          function returns, at which point scheduler_return_fiber() is
- *          automatically invoked.
+ *          function returns, at which point the registered fiber-return hook
+ *          (see cfiber_set_return_hook()) is automatically invoked.
  *
  * @note Fiber functions should not return values directly. Use the user_data
  *       parameter or shared state to communicate results.
@@ -127,22 +128,54 @@ typedef void (*fiber_fn)(void*);
 CFIBER_EXPORT void init_fiber(fiber_t* fiber, fiber_fn func, void* user_data) __attribute__((nonnull(1, 2)));
 
 /**
- * @brief Callback invoked when a fiber's entry function returns.
+ * @brief Signature of the fiber-return hook.
+ * @param ctx Opaque pointer registered alongside the hook (typically the
+ *            scheduler that owns the returning fiber).
  *
- * @details Called automatically by the fiber epilogue when a fiber's function
- *          returns. The built-in scheduler module (cfiber/scheduler/scheduler.h)
- *          provides the default implementation. If fibers are used without the
- *          built-in scheduler, the user must supply a definition of this symbol.
- *
- *          The implementation must:
+ * @details Invoked by the fiber epilogue, on the returning fiber's stack, when a
+ *          fiber's entry function returns. The implementation must:
  *            1. Mark the current fiber as completed / available for reuse.
  *            2. Select the next fiber (or the caller context) to switch to.
  *            3. Call switch_context() — it must never return normally.
  *
- * @note Runs on the returning fiber's stack.
  * @warning Must not return; there is no valid return address on the stack.
  */
-[[noreturn]] CFIBER_EXPORT extern void scheduler_return_fiber(void);
+typedef void (*cfiber_return_hook_fn)(void* ctx);
+
+/**
+ * @brief A registered fiber-return hook (function + its opaque context).
+ */
+typedef struct {
+    cfiber_return_hook_fn fn;
+    void* ctx;
+} cfiber_return_hook_t;
+
+/**
+ * @brief Registers the calling thread's fiber-return hook.
+ * @param fn  Hook invoked when a fiber's entry function returns (must not
+ *            return). Pass NULL to clear.
+ * @param ctx Opaque pointer passed to @p fn on each invocation.
+ * @return The hook that was previously registered, so the caller can restore it
+ *         on exit (supporting nesting and multiple coexisting schedulers).
+ *
+ * @details The hook is dispatched at run time rather than resolved as a link
+ *          time symbol, so it works through a shared library and lets any number
+ *          of schedulers share a process — each registers its own hook while it
+ *          runs and restores the previous one when it returns.
+ *
+ *          A scheduler-free user driving fibers directly with init_fiber() and
+ *          switch_context() registers a hook here instead of defining a symbol.
+ *
+ * @note The registration is thread-local on hosted targets and a plain global on
+ *       bare-metal ARM Cortex-M (which has no TLS), mirroring the built-in
+ *       scheduler's current-scheduler storage.
+ */
+CFIBER_EXPORT cfiber_return_hook_t cfiber_set_return_hook(cfiber_return_hook_fn fn, void* ctx);
+
+/**
+ * @brief Returns the calling thread's currently registered fiber-return hook.
+ */
+CFIBER_EXPORT cfiber_return_hook_t cfiber_get_return_hook(void);
 
 #ifdef __cplusplus
 }

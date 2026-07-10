@@ -1,0 +1,509 @@
+/**
+ * @file  test_reactor.c
+ * @brief Functional tests for the optional epoll(7) reactor.
+ *
+ * Each test builds a reactor, spawns fibers that record results into shared
+ * state, runs the loop to completion, then asserts on that state from the
+ * (non-fiber) test function. Real socketpairs / pipes exercise the park/wake
+ * machinery without any network.
+ */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#include "cfiber/reactor/reactor.h"
+#include "test/test.h"
+
+#include <errno.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <time.h>
+#include <unistd.h>
+
+static const size_t STACK = (size_t)64 * 1024;
+
+static cfiber_reactor_t* make_reactor(void) {
+    return cfiber_reactor_create((cfiber_reactor_config_t){.stack_size = STACK, .stack_cache = 64});
+}
+
+/* A non-blocking, connected socket pair. */
+static int make_pair(int fds[2]) {
+    return socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds);
+}
+
+static int64_t ms_to_ns(int64_t ms) {
+    return ms * 1000000;
+}
+
+/* ============================================================================
+ * spawn / yield / completion ordering
+ * ============================================================================ */
+
+static int g_seq[8];
+static int g_seq_len;
+
+static void ordering_fiber(void* arg) {
+    int id = (int)(intptr_t)arg;
+    g_seq[g_seq_len++] = id; /* run */
+    cfiber_ev_yield();
+    g_seq[g_seq_len++] = id + 10; /* after a yield round */
+}
+
+static int test_spawn_yield_completion(void) {
+    g_seq_len = 0;
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+
+    ASSERT_TRUE(cfiber_reactor_spawn(r, ordering_fiber, (void*)(intptr_t)1, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, ordering_fiber, (void*)(intptr_t)2, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, ordering_fiber, (void*)(intptr_t)3, nullptr));
+
+    cfiber_reactor_run(r);
+
+    /* FIFO: all three run, each yields once, then all three resume in order. */
+    ASSERT_EQ_U32(g_seq_len, 6);
+    ASSERT_EQ_U32(g_seq[0], 1);
+    ASSERT_EQ_U32(g_seq[1], 2);
+    ASSERT_EQ_U32(g_seq[2], 3);
+    ASSERT_EQ_U32(g_seq[3], 11);
+    ASSERT_EQ_U32(g_seq[4], 12);
+    ASSERT_EQ_U32(g_seq[5], 13);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * fd park / wake over a socketpair
+ * ============================================================================ */
+
+static char g_recv[16];
+static ssize_t g_recv_n;
+
+static void reader_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    g_recv_n = cfiber_ev_read(fd, g_recv, sizeof g_recv); /* parks on EAGAIN */
+    close(fd);
+}
+
+static void writer_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    cfiber_ev_yield(); /* let the reader park first */
+    (void)cfiber_ev_write(fd, "hello", 5);
+    close(fd);
+}
+
+static int test_fd_park_wake(void) {
+    g_recv_n = -2;
+    memset(g_recv, 0, sizeof g_recv);
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, reader_fiber, (void*)(intptr_t)fds[0], nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, writer_fiber, (void*)(intptr_t)fds[1], nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_recv_n, 5);
+    ASSERT_TRUE(memcmp(g_recv, "hello", 5) == 0);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * timer ordering (cfiber_ev_sleep)
+ * ============================================================================ */
+
+static int g_wake_order[4];
+static int g_wake_len;
+
+typedef struct {
+    int id;
+    int64_t ms;
+} sleep_arg_t;
+
+static void sleeper_fiber(void* arg) {
+    sleep_arg_t* a = arg;
+    cfiber_ev_status_t st = cfiber_ev_sleep((uint64_t)ms_to_ns(a->ms));
+    if (st == CFIBER_EV_TIMEOUT) {
+        g_wake_order[g_wake_len++] = a->id;
+    }
+}
+
+static int test_timer_ordering(void) {
+    g_wake_len = 0;
+    static sleep_arg_t a0 = {.id = 1, .ms = 30};
+    static sleep_arg_t a1 = {.id = 2, .ms = 10};
+    static sleep_arg_t a2 = {.id = 3, .ms = 20};
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, sleeper_fiber, &a0, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, sleeper_fiber, &a1, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, sleeper_fiber, &a2, nullptr));
+
+    cfiber_reactor_run(r);
+
+    /* Wake in ascending deadline order regardless of spawn order. */
+    ASSERT_EQ_U32(g_wake_len, 3);
+    ASSERT_EQ_U32(g_wake_order[0], 2); /* 10ms */
+    ASSERT_EQ_U32(g_wake_order[1], 3); /* 20ms */
+    ASSERT_EQ_U32(g_wake_order[2], 1); /* 30ms */
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * wait timeout: a read on an fd that never becomes ready
+ * ============================================================================ */
+
+static ssize_t g_timed_rc;
+static int g_timed_errno;
+
+static void timeout_reader_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    char buf[8];
+    g_timed_rc = cfiber_ev_read_timed(fd, buf, sizeof buf, ms_to_ns(10));
+    g_timed_errno = errno;
+    close(fd);
+}
+
+static int test_wait_timeout(void) {
+    g_timed_rc = 0;
+    g_timed_errno = 0;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    /* Only the reader runs; the peer fd[1] is held by the test and never written. */
+    ASSERT_TRUE(cfiber_reactor_spawn(r, timeout_reader_fiber, (void*)(intptr_t)fds[0], nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32((uint32_t)(int)g_timed_rc, (uint32_t)-1);
+    ASSERT_EQ_U32(g_timed_errno, ETIMEDOUT);
+
+    close(fds[1]);
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * cancellation of a parked fiber (same-thread, from another fiber)
+ * ============================================================================ */
+
+static cfiber_ev_status_t g_cancel_status;
+
+typedef struct {
+    cfiber_reactor_t* r;
+    cfiber_reactor_handle_t target;
+} cancel_arg_t;
+
+static void async_waiter_fiber(void* arg) {
+    (void)arg;
+    g_cancel_status = cfiber_ev_wait_async(-1); /* infinite; only cancellation frees it */
+}
+
+static void canceller_fiber(void* arg) {
+    cancel_arg_t* a = arg;
+    cfiber_reactor_cancel(a->r, a->target);
+}
+
+static int test_cancel_parked(void) {
+    g_cancel_status = CFIBER_EV_READY;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+
+    cfiber_reactor_handle_t h;
+    ASSERT_TRUE(cfiber_reactor_spawn(r, async_waiter_fiber, nullptr, &h));
+
+    static cancel_arg_t ca;
+    ca.r = r;
+    ca.target = h;
+    ASSERT_TRUE(cfiber_reactor_spawn(r, canceller_fiber, &ca, nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_cancel_status, CFIBER_EV_CANCELLED);
+
+    /* The handle is now stale; a further cancel is a harmless no-op. */
+    cfiber_reactor_cancel(r, h);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * cross-thread wake and cancel (from a helper pthread while the loop runs)
+ * ============================================================================ */
+
+typedef struct {
+    cfiber_reactor_t* r;
+    cfiber_reactor_handle_t target;
+    bool cancel; /* true: cancel, false: wake */
+} ctrl_arg_t;
+
+static void* control_thread(void* arg) {
+    ctrl_arg_t* a = arg;
+    struct timespec ts = {.tv_sec = 0, .tv_nsec = 20L * 1000000}; /* 20ms */
+    nanosleep(&ts, nullptr);
+    if (a->cancel) {
+        cfiber_reactor_cancel(a->r, a->target);
+    } else {
+        cfiber_reactor_wake(a->r, a->target);
+    }
+    return nullptr;
+}
+
+static cfiber_ev_status_t g_xthread_status;
+
+static void xthread_waiter_fiber(void* arg) {
+    (void)arg;
+    g_xthread_status = cfiber_ev_wait_async(-1);
+}
+
+static int run_xthread(bool cancel, cfiber_ev_status_t expect) {
+    g_xthread_status = CFIBER_EV_ERROR;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+
+    cfiber_reactor_handle_t h;
+    ASSERT_TRUE(cfiber_reactor_spawn(r, xthread_waiter_fiber, nullptr, &h));
+
+    ctrl_arg_t ca = {.r = r, .target = h, .cancel = cancel};
+    pthread_t th;
+    ASSERT_EQ_U32(pthread_create(&th, nullptr, control_thread, &ca), 0);
+
+    cfiber_reactor_run(r); /* blocks until the helper wakes/cancels the fiber */
+
+    pthread_join(th, nullptr);
+    ASSERT_EQ_U32(g_xthread_status, expect);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+static int test_cross_thread_wake(void) {
+    return run_xthread(/*cancel=*/false, CFIBER_EV_READY);
+}
+
+static int test_cross_thread_cancel(void) {
+    return run_xthread(/*cancel=*/true, CFIBER_EV_CANCELLED);
+}
+
+/* ============================================================================
+ * same-thread wake / cancel fast path (cfiber_ev_wake / cfiber_ev_cancel)
+ * ============================================================================ */
+
+static cfiber_ev_status_t g_inproc_wake_st;
+static cfiber_ev_status_t g_inproc_cancel_st;
+
+static void inproc_wake_waiter(void* arg) {
+    (void)arg;
+    g_inproc_wake_st = cfiber_ev_wait_async(-1);
+}
+
+static void inproc_cancel_waiter(void* arg) {
+    (void)arg;
+    g_inproc_cancel_st = cfiber_ev_wait_async(-1);
+}
+
+typedef struct {
+    cfiber_reactor_handle_t wake_h;
+    cfiber_reactor_handle_t cancel_h;
+} inproc_driver_arg_t;
+
+static void inproc_driver(void* arg) {
+    inproc_driver_arg_t* a = arg;
+    cfiber_ev_wake(a->wake_h);     /* direct apply, no eventfd hop */
+    cfiber_ev_cancel(a->cancel_h); /* direct apply */
+}
+
+static int test_inproc_wake_cancel(void) {
+    g_inproc_wake_st = CFIBER_EV_ERROR;
+    g_inproc_cancel_st = CFIBER_EV_ERROR;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+
+    static inproc_driver_arg_t da;
+    ASSERT_TRUE(cfiber_reactor_spawn(r, inproc_wake_waiter, nullptr, &da.wake_h));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, inproc_cancel_waiter, nullptr, &da.cancel_h));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, inproc_driver, &da, nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_inproc_wake_st, CFIBER_EV_READY);
+    ASSERT_EQ_U32(g_inproc_cancel_st, CFIBER_EV_CANCELLED);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * cross-thread ring stress: several producer threads waking many fibers
+ * ============================================================================ */
+
+#define RING_WAITERS 64
+#define RING_THREADS 4
+
+static cfiber_ev_status_t g_ring_st[RING_WAITERS];
+
+static void ring_waiter(void* arg) {
+    long i = (long)(intptr_t)arg;
+    g_ring_st[i] = cfiber_ev_wait_async(-1);
+}
+
+typedef struct {
+    cfiber_reactor_t* r;
+    cfiber_reactor_handle_t* handles;
+    int lo;
+    int hi;
+} waker_arg_t;
+
+static void* waker_thread(void* arg) {
+    waker_arg_t* a = arg;
+    struct timespec ts = {.tv_sec = 0, .tv_nsec = 50L * 1000000}; /* let waiters park */
+    nanosleep(&ts, nullptr);
+    for (int i = a->lo; i < a->hi; i++) {
+        cfiber_reactor_wake(a->r, a->handles[i]); /* concurrent MPMC producers */
+    }
+    return nullptr;
+}
+
+static int test_ring_stress(void) {
+    for (int i = 0; i < RING_WAITERS; i++) {
+        g_ring_st[i] = CFIBER_EV_ERROR;
+    }
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+
+    static cfiber_reactor_handle_t handles[RING_WAITERS];
+    for (long i = 0; i < RING_WAITERS; i++) {
+        ASSERT_TRUE(cfiber_reactor_spawn(r, ring_waiter, (void*)(intptr_t)i, &handles[i]));
+    }
+
+    pthread_t th[RING_THREADS];
+    waker_arg_t wa[RING_THREADS];
+    const int per = RING_WAITERS / RING_THREADS;
+    for (int t = 0; t < RING_THREADS; t++) {
+        wa[t] = (waker_arg_t){.r = r, .handles = handles, .lo = t * per, .hi = (t + 1) * per};
+        ASSERT_EQ_U32(pthread_create(&th[t], nullptr, waker_thread, &wa[t]), 0);
+    }
+
+    cfiber_reactor_run(r); /* blocks until all waiters are woken across threads */
+
+    for (int t = 0; t < RING_THREADS; t++) {
+        pthread_join(th[t], nullptr);
+    }
+    for (int i = 0; i < RING_WAITERS; i++) {
+        ASSERT_EQ_U32(g_ring_st[i], CFIBER_EV_READY);
+    }
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * concurrency stress: many echo pairs multiplexed on one loop
+ * ============================================================================ */
+
+#define STRESS_PAIRS 200
+
+static int g_echo_ok;
+
+static void echo_server_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    char buf[32];
+    ssize_t n = cfiber_ev_read(fd, buf, sizeof buf);
+    if (n > 0) {
+        (void)cfiber_ev_write(fd, buf, (size_t)n);
+    }
+    close(fd);
+}
+
+static void echo_client_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    const char* msg = "ping";
+    char buf[32];
+    if (cfiber_ev_write(fd, msg, 4) == 4) {
+        ssize_t n = cfiber_ev_read(fd, buf, sizeof buf);
+        if (n == 4 && memcmp(buf, msg, 4) == 0) {
+            g_echo_ok++;
+        }
+    }
+    close(fd);
+}
+
+static int test_concurrency_stress(void) {
+    g_echo_ok = 0;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+
+    for (int i = 0; i < STRESS_PAIRS; i++) {
+        int fds[2];
+        ASSERT_EQ_U32(make_pair(fds), 0);
+        ASSERT_TRUE(cfiber_reactor_spawn(r, echo_server_fiber, (void*)(intptr_t)fds[1], nullptr));
+        ASSERT_TRUE(cfiber_reactor_spawn(r, echo_client_fiber, (void*)(intptr_t)fds[0], nullptr));
+    }
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_echo_ok, STRESS_PAIRS);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * create / run / destroy churn (leak balance under ASan)
+ * ============================================================================ */
+
+static void trivial_fiber(void* arg) {
+    (void)arg;
+    cfiber_ev_yield();
+}
+
+static int test_create_destroy_churn(void) {
+    for (int i = 0; i < 32; i++) {
+        cfiber_reactor_t* r = make_reactor();
+        ASSERT_NOT_NULL(r);
+        ASSERT_TRUE(cfiber_reactor_spawn(r, trivial_fiber, nullptr, nullptr));
+        ASSERT_TRUE(cfiber_reactor_spawn(r, trivial_fiber, nullptr, nullptr));
+        cfiber_reactor_run(r);
+        cfiber_reactor_destroy(r);
+    }
+    return 0;
+}
+
+int main(void) {
+    cfiber_test_suite_begin("epoll reactor");
+
+    RUN_TEST(test_spawn_yield_completion);
+    RUN_TEST(test_fd_park_wake);
+    RUN_TEST(test_timer_ordering);
+    RUN_TEST(test_wait_timeout);
+    RUN_TEST(test_cancel_parked);
+    RUN_TEST(test_cross_thread_wake);
+    RUN_TEST(test_cross_thread_cancel);
+    RUN_TEST(test_inproc_wake_cancel);
+    RUN_TEST(test_ring_stress);
+    RUN_TEST(test_concurrency_stress);
+    RUN_TEST(test_create_destroy_churn);
+
+    return cfiber_test_report();
+}

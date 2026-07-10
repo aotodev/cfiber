@@ -25,7 +25,7 @@ context switches.
 - Slab and multislab fixed-size allocators usable without `malloc`.
 - Growable hosted stacks: `mmap` + `PROT_NONE` guard page + SIGSEGV-driven
   growth, with a pool that recycles `MADV_DONTNEED` pages on release.
-- Pluggable backing allocator on the scheduler — pass any `(alloc, free, ctx)`
+- Pluggable backing allocator on the scheduler: pass any `(alloc, free, ctx)`
   triple instead of `malloc`/`free`. The full library (scheduler included)
   runs on bare metal this way.
 - Optional stack sanitizer: canary check on release + watermark-based peak
@@ -65,7 +65,7 @@ Select a compiler at configure time with `CC=clang cmake ...` or
 ## Building
 
 ```bash
-cmake -B build -DBUILD_SAMPLE=ON -DBUILD_TESTS=ON
+cmake -B build -DCFIBER_BUILD_EXAMPLES=ON -DBUILD_TESTS=ON
 cmake --build build -j
 ctest --test-dir build
 ```
@@ -73,14 +73,14 @@ ctest --test-dir build
 A convenience script handles native and cross builds plus QEMU execution:
 
 ```bash
-./utils/make.sh -t -s                              # native, tests + sample
-./utils/make.sh -t -s --sanitizer                  # with stack sanitizer (canary)
-./utils/make.sh -t -s --asan                       # with AddressSanitizer (x86_64)
-./utils/make.sh -t -s --ubsan                      # with UndefinedBehaviorSanitizer
-./utils/make.sh -t -s -d                           # Debug build
-./utils/make.sh -t -s --shared                     # shared library
-./utils/make.sh -t -s --pic                        # static + PIC
-./utils/make.sh --arch=aarch64 -t -s               # AArch64 via qemu-user
+./utils/make.sh -t -e                              # native, tests + examples
+./utils/make.sh -t -e --sanitizer                  # with stack sanitizer (canary)
+./utils/make.sh -t -e --asan                       # with AddressSanitizer (x86_64)
+./utils/make.sh -t -e --ubsan                      # with UndefinedBehaviorSanitizer
+./utils/make.sh -t -e -d                           # Debug build
+./utils/make.sh -t -e --shared                     # shared library
+./utils/make.sh -t -e --pic                        # static + PIC
+./utils/make.sh --arch=aarch64 -t -e               # AArch64 via qemu-user
 ./utils/make.sh --arch=arm --cpu=cortex-m0 -t      # Cortex-M0
 ./utils/make.sh --arch=arm --cpu=cortex-m7 -t      # Cortex-M7 with FPU
 ./utils/make.sh --help
@@ -90,18 +90,20 @@ A convenience script handles native and cross builds plus QEMU execution:
 
 | Option                              | Default | Description                                                  |
 | ----------------------------------- | ------- | ------------------------------------------------------------ |
-| `BUILD_SAMPLE`                      | `OFF`   | Build the sample scheduler executable                        |
+| `CFIBER_BUILD_EXAMPLES`             | `OFF`   | Build the standalone examples (`examples/`)                  |
 | `BUILD_TESTS`                       | `OFF`   | Build the unit-test executables                              |
 | `CFIBER_STACK_SANITIZER`            | `OFF`   | Enable canary + watermark instrumentation                    |
 | `CFIBER_ASAN`                       | `OFF`   | Build with AddressSanitizer + fiber-aware instrumentation (hosted only; excludes `CFIBER_STACK_SANITIZER`) |
-| `CFIBER_ASAN_REDZONE`               | —       | Guard size in bytes below each fiber stack (default: one cache line). Only used with `CFIBER_ASAN` |
+| `CFIBER_ASAN_REDZONE`               | -       | Guard size in bytes below each fiber stack (default: one cache line). Only used with `CFIBER_ASAN` |
 | `CFIBER_UBSAN`                      | `OFF`   | Build with UndefinedBehaviorSanitizer; aborts on the first finding (hosted only; combinable with `CFIBER_ASAN`) |
+| `CFIBER_TSAN`                       | `OFF`   | Build with ThreadSanitizer for the reactor's concurrency (hosted x86_64; excludes `CFIBER_ASAN`/`CFIBER_FUZZ`) |
 | `CFIBER_FUZZ`                       | `OFF`   | Build the libFuzzer targets under ASan + UBSan (Clang + hosted only)        |
+| `CFIBER_REACTOR`                    | `OFF`   | Build the optional epoll(7) reactor (`libcfiber_reactor`); Linux only       |
 | `CFIBER_BUILD_SHARED`               | `OFF`   | Build as a shared library (`libcfiber.so`) instead of static |
 | `CFIBER_POSITION_INDEPENDENT_CODE`  | `OFF`   | Build the static library with `-fPIC` (ignored when shared)  |
-| `CFIBER_TARGET_CPU`                 | —       | `cortex-m0` / `cortex-m3` / `cortex-m4` / `cortex-m7`        |
-| `CFIBER_ARM_FLOAT_ABI`              | —       | `soft` / `softfp` / `hard`                                   |
-| `CFIBER_ARM_FPU`                    | —       | FPU name forwarded to `-mfpu` (e.g. `fpv5-sp-d16`)           |
+| `CFIBER_TARGET_CPU`                 | -       | `cortex-m0` / `cortex-m3` / `cortex-m4` / `cortex-m7`        |
+| `CFIBER_ARM_FLOAT_ABI`              | -       | `soft` / `softfp` / `hard`                                   |
+| `CFIBER_ARM_FPU`                    | -       | FPU name forwarded to `-mfpu` (e.g. `fpv5-sp-d16`)           |
 
 The default is a static archive. Shared builds export only the documented API
 (everything declared with `CFIBER_EXPORT` in the public headers) and hide
@@ -112,11 +114,12 @@ target (bare-metal Cortex-M has no dynamic loader).
 If the static library will be linked into a downstream shared object, enable
 `CFIBER_POSITION_INDEPENDENT_CODE` to avoid text-relocation errors.
 
-One caveat for shared builds: cfiber's `scheduler_return_fiber` symbol is
-overridable at link time when using the static library (a user can replace the
-built-in scheduler's definition with their own). That override mechanism does
-not work through a shared library, so projects that need a custom
-`scheduler_return_fiber` must use the static build.
+A custom scheduler supplies its fiber-completion behaviour by registering a
+fiber-return hook at run time with `cfiber_set_return_hook()` (rather than
+overriding a link-time symbol). Because the hook is dispatched at run time, this
+works identically against the static and shared builds, and several schedulers
+can coexist in one process; each registers its own hook while running and
+restores the previous one on exit.
 
 ### Consuming as a subdirectory
 
@@ -241,13 +244,13 @@ int main(void) {
 }
 ```
 
-See [sample/runtime_example.c](sample/runtime_example.c) for nested spawns and
+See [examples/scheduler/runtime_example.c](examples/scheduler/runtime_example.c) for nested spawns and
 fibers that spawn other fibers.
 
 ## Freestanding example
 
-The full feature set — scheduler, slab/multislab allocators, fixed-size stack
-manager, and the canary/watermark sanitizer — works on bare metal. The only
+The full feature set (scheduler, slab/multislab allocators, fixed-size stack
+manager, and the canary/watermark sanitizer) works on bare metal. The only
 hosted-only components are the growable-stack allocator and its SIGSEGV handler
 (both require an MMU and POSIX signals).
 
@@ -315,8 +318,65 @@ fixed-size stack allocator at [include/cfiber/stack/fixed_size_stack_allocator.h
 and the sanitizer, is available.
 
 If a scheduler is not desired, fibers can be driven directly with `init_fiber`
-and `switch_context` and the user supplies their own `scheduler_return_fiber`
-implementation (called when a fiber's entry function returns).
+and `switch_context`, and the user registers a fiber-return hook with
+`cfiber_set_return_hook()` (called on the returning fiber's stack when its entry
+function returns).
+
+## epoll reactor (optional, Linux)
+
+`CFIBER_REACTOR` builds an optional, Linux-only `epoll(7)` reactor as a separate
+library, `libcfiber_reactor`. It is an alternative scheduler (built on cfiber's
+fiber + growable-stack mechanism rather than the built-in FCFS scheduler) that
+multiplexes many fibers onto one thread. A fiber that would block on a
+non-blocking descriptor instead *parks* (registers interest with the poller and
+yields); the loop resumes it when the descriptor is ready, a deadline elapses, or
+it is cancelled. It registers its fiber-return hook at run time via
+`cfiber_set_return_hook()`, so it coexists with the built-in scheduler and works
+through the shared library too.
+
+```sh
+cmake -B build -DCFIBER_REACTOR=ON
+# or:  ./utils/make.sh -t --reactor          # build + run the reactor tests
+```
+
+The header is [include/cfiber/reactor/reactor.h](include/cfiber/reactor/reactor.h).
+
+The irreducible primitive is
+
+```c
+cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns);
+```
+
+which reads "park the current fiber until `fd` is ready in `direction` (`EPOLLIN` /
+`EPOLLOUT`), the timeout elapses, or the fiber is cancelled." The byte-stream
+helpers `cfiber_ev_read` / `_write` / `_accept` / `_connect` are a thin POSIX
+*transport layer* over that primitive: they loop on `EAGAIN` and call
+`cfiber_ev_wait` with the appropriate direction. A different transport (TLS, UDP)
+is just a different helper layer over the same primitive; the loop never bakes
+in a direction or a protocol. The reactor also provides `cfiber_ev_sleep`,
+deadline-bearing waits (`cfiber_ev_read_timed` / `_write_timed`), cooperative
+`cfiber_ev_yield`, and `cfiber_ev_spawn`.
+
+Timers are a monotonic deadline min-heap that feeds the `epoll_wait` timeout.
+Cross-thread wakeup and cancellation (`cfiber_reactor_wake()` and
+`cfiber_reactor_cancel()`, safe from any thread) post to a bounded lock-free
+ring and poke an `eventfd` to break the loop out of `epoll_wait`; issued from the
+loop thread itself they are applied directly. From within a fiber, the
+`cfiber_ev_wake()` / `cfiber_ev_cancel()` fast paths skip the ring entirely.
+Cancelling a parked fiber resumes it with `CFIBER_EV_CANCELLED`, and an in-flight
+transport helper then returns `-1` with `errno == ECANCELED`.
+
+Handles are generation-tagged references into an address-stable fiber pool
+(cfiber's `multislab`), so waking or cancelling a fiber that has already
+completed is a safe no-op rather than a use-after-free.
+
+A standalone WebSocket (RFC 6455) echo server built on the reactor lives in
+[examples/ws_echo](examples/ws_echo) (built when `CFIBER_REACTOR=ON`).
+
+Scope: one reactor per thread (the single-loop-per-core model), and one fiber
+owns a given descriptor at a time. The full-duplex reader+writer split (two
+fibers on one fd) and non-POSIX transports (TLS, UDP) are future work that the
+`cfiber_ev_wait` primitive is designed to accommodate.
 
 ## Debugging with AddressSanitizer
 
@@ -338,7 +398,7 @@ fiber-specific instrumentation:
 cmake -B build -DCFIBER_ASAN=ON -DBUILD_TESTS=ON
 cmake --build build -j
 ASAN_OPTIONS=detect_stack_use_after_return=1 ctest --test-dir build
-# or: ./utils/make.sh -t -s --asan
+# or: ./utils/make.sh -t -e --asan
 ```
 
 This is the hosted counterpart to `CFIBER_STACK_SANITIZER` (canary + watermark),
@@ -380,19 +440,23 @@ include/cfiber/
   debug/       AddressSanitizer integration (poisoning + switch annotations)
   fiber/       low-level context + fiber API (context.h, fiber.h)
   memory/      slab + multislab allocators
+  reactor/     optional epoll(7) reactor (Linux only)
   scheduler/   cooperative FCFS scheduler
   stack/       stack descriptor + fixed-size and growable allocators
     debug/     canary + watermark sanitizer
 src/cfiber/    matching implementation files; per-arch assembly under fiber/
-sample/        example using the built-in scheduler
+examples/
+  scheduler/   built-in scheduler example (all targets, incl. bare-metal ARM)
+  ws_echo/     WebSocket echo on the reactor (Linux, needs CFIBER_REACTOR)
 tests/
   fiber/       register-preservation tests, one per architecture
   memory/      slab + multislab allocator tests
+  reactor/     epoll reactor tests
   scheduler/   scheduler tests
   stack/       fixed-size + growable stack tests, canary/watermark sanitizer
   defensive/   misuse / error-path tests (built with NDEBUG)
   test/        the minimal test framework (test.h + test.c)
-fuzz/          libFuzzer harnesses for the allocator and scheduler
+fuzz/          libFuzzer harnesses for the allocator, scheduler and reactor
 utils/
   make.sh      build + run convenience script
   cortex/      startup code and linker scripts for QEMU Cortex-M targets

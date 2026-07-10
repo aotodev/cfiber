@@ -56,16 +56,18 @@ static void task_free(cfiber_scheduler_t* s, cfiber_task_t* t) {
 }
 
 /* ============================================================================
- * scheduler_return_fiber  —  fiber.h contract
+ * builtin_return_hook  —  fiber-return hook (fiber.h contract)
  *
- * Called by the fiber prologue/epilogue assembly when a fiber's entry
- * function returns.  We mark the task as a zombie and return to the
- * scheduler loop so it can safely free the stack we are currently on.
+ * Registered with cfiber_set_return_hook() for the duration of
+ * cfiber_scheduler_run().  Called by the fiber epilogue, on the returning
+ * fiber's stack, when a fiber's entry function returns.  We mark the task as a
+ * zombie and return to the scheduler loop so it can safely free the stack we
+ * are currently on.  The scheduler is passed as the hook ctx.
  * ============================================================================ */
 
-[[noreturn]] void scheduler_return_fiber(void) {
-    cfiber_scheduler_t* s = s_current_sched;
-    ASSERT(s && "scheduler_return_fiber: no active scheduler");
+[[noreturn]] static void builtin_return_hook(void* ctx) {
+    cfiber_scheduler_t* s = ctx;
+    ASSERT(s && "builtin_return_hook: no active scheduler");
 
     cfiber_task_t* dead = s->current;
     s->zombie = dead;
@@ -178,6 +180,7 @@ bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, fiber_fn func, void* user
 
 void cfiber_scheduler_run(cfiber_scheduler_t* sched) {
     s_current_sched = sched;
+    cfiber_return_hook_t prev_hook = cfiber_set_return_hook(builtin_return_hook, sched);
 
     while (sched->active_count > 0) {
         /* Free the zombie from the previous iteration (safe — we are on the
@@ -203,6 +206,7 @@ void cfiber_scheduler_run(cfiber_scheduler_t* sched) {
         sched->zombie = nullptr;
     }
 
+    cfiber_set_return_hook(prev_hook.fn, prev_hook.ctx);
     s_current_sched = nullptr;
 }
 

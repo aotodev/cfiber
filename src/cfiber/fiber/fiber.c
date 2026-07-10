@@ -2,13 +2,41 @@
 
 #include "cfiber/core/macros.h"
 
+/* ============================================================================
+ * Fiber-return hook registration
+ *
+ * The epilogue dispatches through a runtime-registered hook rather than a
+ * link-time symbol, so schedulers can be swapped in at run time, coexist in one
+ * process, and work through a shared library. Storage is thread-local on hosted
+ * targets and a plain global on bare-metal ARM Cortex-M (no TLS), mirroring the
+ * built-in scheduler's current-scheduler storage.
+ * ============================================================================ */
+#if defined(__arm__) && !defined(__aarch64__)
+static cfiber_return_hook_t s_return_hook;
+#else
+static thread_local cfiber_return_hook_t s_return_hook;
+#endif
+
+cfiber_return_hook_t cfiber_set_return_hook(cfiber_return_hook_fn fn, void* ctx) {
+    cfiber_return_hook_t prev = s_return_hook;
+    s_return_hook.fn = fn;
+    s_return_hook.ctx = ctx;
+    return prev;
+}
+
+cfiber_return_hook_t cfiber_get_return_hook(void) {
+    return s_return_hook;
+}
+
 /**
- * @brief Calls the scheduler-defined epilogue when a fiber returns.
- * @details Implemented by the scheduler (see scheduler_return_fiber()).
+ * @brief Invokes the registered fiber-return hook when a fiber returns.
+ * @details Runs on the returning fiber's stack. The hook (registered via
+ *          cfiber_set_return_hook()) must not return.
  */
 // NOLINTNEXTLINE(misc-use-internal-linkage): false positive — called from per-arch assembly
 [[noreturn]] void fiber_epilogue(void) {
-    scheduler_return_fiber();
+    ASSERT(s_return_hook.fn && "fiber returned with no fiber-return hook registered");
+    s_return_hook.fn(s_return_hook.ctx);
 
     /* Should never reach here — scheduler bug if we do. */
     ASSERT(false);
