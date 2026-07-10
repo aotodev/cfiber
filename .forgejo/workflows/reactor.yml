@@ -1,0 +1,39 @@
+# Optional epoll(7) reactor (Linux, x86_64) under ThreadSanitizer.
+#
+# TSan is the reactor's defining check: it exercises the lock-free command ring
+# and cross-thread wake/cancel for data races. The run also builds and runs the
+# reactor unit tests and the WebSocket echo self-test. The core library is
+# covered by the x86_64 / aarch64 / cortex-m workflows; asan/ubsan additionally
+# exercise the reactor there.
+name: reactor
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/reactor/**'
+      - 'examples/ws_echo/**'
+      - 'utils/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.forgejo/workflows/**'
+  pull_request:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  tsan:
+    runs-on: docker
+    container:
+      image: "${{ vars.CI_IMAGE }}"
+      credentials:
+        username: "${{ github.repository_owner }}"
+        password: "${{ secrets.REGISTRY_TOKEN }}"
+    name: "reactor (tsan)"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run reactor tests under ThreadSanitizer
+        run: ./utils/make.sh -t -e -d --tsan --reactor

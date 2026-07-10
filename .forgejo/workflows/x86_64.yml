@@ -7,6 +7,7 @@ on:
       - 'src/**'
       - 'include/**'
       - 'tests/**'
+      - 'examples/**'
       - 'fuzz/**'
       - 'utils/**'
       - 'cmake/**'
@@ -31,11 +32,17 @@ jobs:
       matrix:
         include:
           - name: asan
-            args: "-t -d --asan"
+            args: "-t -e -d --asan --reactor"
           - name: ubsan
-            args: "-t -d --ubsan"
+            args: "-t -e -d --ubsan --reactor"
           - name: stack-sanitizer
-            args: "-t -d --sanitizer"
+            args: "-t -e -d --sanitizer"
+          # Shared build (Release). No -t: the whitebox unit tests reference
+          # internal, non-exported symbols and cannot link the shared library.
+          # The examples are the consumer smoke test; they link the public API
+          # only, so a missing export fails the build.
+          - name: shared
+            args: "-e --shared --reactor"
     name: "x86_64 (${{ matrix.name }})"
     steps:
       - uses: actions/checkout@v4

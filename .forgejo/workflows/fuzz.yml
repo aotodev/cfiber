@@ -1,4 +1,4 @@
-# Time-boxed libFuzzer smoke run for the allocator and scheduler harnesses.
+# Time-boxed libFuzzer smoke run for the allocator, scheduler and reactor harnesses.
 name: fuzz
 
 on:
@@ -28,9 +28,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build fuzzers
         run: |
-          CC=clang cmake -G Ninja -B build-fuzz -DBUILD_TESTS=ON -DCFIBER_FUZZ=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          CC=clang cmake -G Ninja -B build-fuzz \
+            -DBUILD_TESTS=ON -DCFIBER_FUZZ=ON -DCFIBER_REACTOR=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
           cmake --build build-fuzz -j
       - name: Smoke-run fuzzers
         run: |
           ./build-fuzz/fuzz/fuzz_multislab -max_total_time=45 -print_final_stats=1
           ./build-fuzz/fuzz/fuzz_scheduler -max_total_time=45 -rss_limit_mb=4096 -print_final_stats=1
+          ./build-fuzz/fuzz/fuzz_reactor -max_total_time=45 -rss_limit_mb=4096 -print_final_stats=1
