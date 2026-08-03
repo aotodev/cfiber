@@ -13,7 +13,7 @@ on:
       - 'utils/**'
       - 'cmake/**'
       - '**/CMakeLists.txt'
-      - '.github/workflows/**'
+      - '.github/workflows/reactor.yml'
   pull_request:
 
 permissions:

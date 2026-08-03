@@ -10,7 +10,7 @@ on:
       - 'fuzz/**'
       - 'cmake/**'
       - '**/CMakeLists.txt'
-      - '.github/workflows/**'
+      - '.github/workflows/fuzz.yml'
   pull_request:
 
 permissions:

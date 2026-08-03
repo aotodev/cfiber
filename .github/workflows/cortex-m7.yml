@@ -12,7 +12,7 @@ on:
       - 'utils/**'
       - 'cmake/**'
       - '**/CMakeLists.txt'
-      - '.github/workflows/**'
+      - '.github/workflows/cortex-m7.yml'
   pull_request:
 
 permissions:
