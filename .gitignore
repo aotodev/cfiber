@@ -36,6 +36,9 @@ compile_commands.json
 .clangd
 .ccls-cache/
 
+# Personal notes, never shared
+*.local.md
+
 # Editors / IDEs
 .vscode/
 .idea/
