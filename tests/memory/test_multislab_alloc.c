@@ -331,7 +331,7 @@ static int test_multislab_no_leak_via_counting_allocator(void) {
         blocks[i] = multislab_alloc(&ms);
         ASSERT_NOT_NULL(blocks[i]);
     }
-    /* free half, allocate more, free the rest — churn the lists */
+    /* free half, allocate more, free the rest, churning the lists */
     for (uint32_t i = 0; i < 10; i += 2) {
         multislab_release(&ms, blocks[i]);
     }

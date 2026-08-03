@@ -1,5 +1,5 @@
 /*==============================================================================
- * Linker script for QEMU MPS2‑AN500 (Cortex‑M7, 4 MiB FLASH, 4 MiB SRAM)
+ * Linker script for QEMU MPS2-AN500 (Cortex-M7, 4 MiB FLASH, 4 MiB SRAM)
  *==============================================================================*/
 
 ENTRY(_start)
@@ -36,7 +36,7 @@ SECTIONS
       __text_end__ = .;
     } > FLASH
     /*----------------------------------------------------------*
-     * Initialized data — load in FLASH, run in RAM
+     * Initialized data: load in FLASH, run in RAM
      *----------------------------------------------------------*/
     .data : AT(__text_end__)
     {
@@ -48,7 +48,7 @@ SECTIONS
     } > RAM
 
     /*----------------------------------------------------------*
-     * Uninitialized data (zero‑fill in RAM)
+     * Uninitialized data (zero-fill in RAM)
      *----------------------------------------------------------*/
     .bss (NOLOAD) :
     {
@@ -65,7 +65,7 @@ SECTIONS
     {
         . = ALIGN(8);
         __stack_bottom__ = .;
-        . += 0x00001000;            /* 4 KiB stack – adjust as desired */
+        . += 0x00001000;            /* 4 KiB stack, adjust as desired */
         __stack_top__ = .;
     } > RAM
 

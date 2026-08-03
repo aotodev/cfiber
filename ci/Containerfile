@@ -5,6 +5,9 @@ FROM archlinux:latest
 # Links the published package to the repo, so it inherits the repo's permissions.
 LABEL org.opencontainers.image.source=https://github.com/aotodev/cfiber
 
+# aarch64-linux-gnu-glibc: ld-linux-aarch64.so.1, needed to link the AArch64 tests
+#   and for `qemu-aarch64 -L` to run them.
+# make: make.sh configures with -G "Unix Makefiles"; ninja is only for the fuzz job.
 RUN pacman -Syu --noconfirm \
         clang llvm gcc \
         cmake ninja make \
@@ -13,7 +16,3 @@ RUN pacman -Syu --noconfirm \
         aarch64-linux-gnu-gcc aarch64-linux-gnu-glibc \
         arm-none-eabi-gcc arm-none-eabi-newlib \
     && pacman -Scc --noconfirm
-
-# aarch64-linux-gnu-glibc: target libc + ld-linux-aarch64.so.1, needed to link the
-#   AArch64 tests and for `qemu-aarch64 -L /usr/aarch64-linux-gnu` to run them.
-# make: make.sh configures with -G "Unix Makefiles"; ninja is only for the fuzz job.

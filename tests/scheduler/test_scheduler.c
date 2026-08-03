@@ -11,8 +11,8 @@
  * Fiber functions cannot use the fatal ASSERT_* macros (those `return` from the
  * enclosing function, and a fiber returning means completion). Instead fibers
  * record what they observed into a shared struct owned by the test function's
- * stack frame — valid because cfiber_scheduler_run() runs every fiber
- * synchronously before returning — and the test asserts afterwards.
+ * stack frame. Valid because cfiber_scheduler_run() runs every fiber
+ * synchronously before returning, and the test asserts afterwards.
  */
 
 #include "cfiber/scheduler/scheduler.h"
@@ -314,7 +314,7 @@ static int test_scheduler_reuse_after_drain(void) {
 
     sequence s = {0};
 
-    /* run, fully drain, then run again on the same scheduler — slabs and
+    /* run, fully drain, then run again on the same scheduler, so slabs and
      * task nodes from the first batch must be reusable */
     for (int round = 0; round < 2; round++) {
         simple_arg a = {.seq = &s, .id = round};

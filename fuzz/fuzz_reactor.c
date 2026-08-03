@@ -3,7 +3,7 @@
  * @brief Coverage-guided fuzzer for the epoll(7) reactor.
  *
  * @details
- * Interprets the input as a set of fiber "plans" — each a short, deterministic
+ * Interprets the input as a set of fiber "plans", each a short, deterministic
  * script of reactor operations (sleep, park on a self-owned socketpair with a
  * finite timeout, spawn leaf children, cancel a sibling). Every wait carries a
  * finite deadline and every fiber closes its own descriptors, so the loop always

@@ -5,7 +5,7 @@
  * @details
  * The freestanding/non-MMU counterpart to ASan (see cfiber/debug/asan.h). Only
  * built when CFIBER_STACK_SANITIZER=1, where cstack_debug_* are real functions
- * rather than no-op stubs. Tests use a plain local buffer as the fake stack —
+ * rather than no-op stubs. Tests use a plain local buffer as the fake stack,
  * no OS facilities required, so this mirrors the Cortex-M usage.
  */
 

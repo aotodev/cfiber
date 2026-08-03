@@ -1,26 +1,10 @@
 ---
-# clang-tidy configuration for cfiber.
+# clang-tidy configuration for cfiber (C23).
 #
-# Curated for a C23 codebase.
-#
-# Notable disables (rationale):
-#   bugprone-easily-swappable-parameters        too pedantic for low-level APIs
-#   bugprone-assignment-in-if-condition         used intentionally in this codebase
-#   bugprone-macro-parentheses                  false positives on token-pasting macros
-#   clang-analyzer-security.insecureAPI...      Annex K (memset_s &c) not portable on glibc
-#   misc-include-cleaner                        too aggressive on transitive includes
-#   misc-no-recursion                           recursion is fine where used
-#   misc-unused-parameters                      common in callback signatures
-#   performance-no-int-to-ptr                   intentional in allocator + fiber init
-#   readability-magic-numbers                   noisy on register indices, alignments
-#   readability-identifier-length               too pedantic (i, n, p are fine)
-#   readability-function-cognitive-complexity   not actionable as a single metric
-#   readability-isolate-declaration             noisy on multi-decls in tests
-#   readability-uppercase-literal-suffix        we don't enforce case on 'ull' &c
-#   cert-dcl16-c                                alias of uppercase-literal-suffix
-#   cert-err33-c                                excessive — flags every unchecked stdlib call
+# readability-implicit-bool-conversion is off because it demands the `!= 0` and
+# `!= NULL` spellings the project's style rules forbid.
 
-Checks: '-*,bugprone-*,cert-*,clang-analyzer-*,concurrency-*,misc-*,performance-*,portability-*,readability-*,-bugprone-easily-swappable-parameters,-bugprone-assignment-in-if-condition,-bugprone-macro-parentheses,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,-misc-include-cleaner,-misc-no-recursion,-misc-unused-parameters,-performance-no-int-to-ptr,-readability-magic-numbers,-readability-identifier-length,-readability-function-cognitive-complexity,-readability-isolate-declaration,-readability-uppercase-literal-suffix,-cert-dcl16-c,-cert-err33-c'
+Checks: '-*,bugprone-*,cert-*,clang-analyzer-*,concurrency-*,misc-*,performance-*,portability-*,readability-*,-bugprone-easily-swappable-parameters,-bugprone-assignment-in-if-condition,-bugprone-macro-parentheses,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,-misc-include-cleaner,-misc-no-recursion,-misc-unused-parameters,-performance-no-int-to-ptr,-readability-implicit-bool-conversion,-readability-magic-numbers,-readability-identifier-length,-readability-function-cognitive-complexity,-readability-isolate-declaration,-readability-uppercase-literal-suffix,-cert-dcl16-c,-cert-err33-c'
 
 WarningsAsErrors: ''
 HeaderFilterRegex: '^(src|include|tests|sample)/'

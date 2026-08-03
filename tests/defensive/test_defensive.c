@@ -6,7 +6,7 @@
  * The allocators and stack helpers guard against misuse (bad init parameters,
  * double-free, releasing a foreign pointer, destroying with live stacks). In a
  * debug build those guards fire ASSERT()/assert(), which is __builtin_trap() /
- * abort() — impossible to test without killing the process. Compiled with
+ * abort(), which is impossible to test without killing the process. Compiled with
  * NDEBUG, the asserts disarm and the functions fall through to their defined
  * error behaviour (return -1 / nullptr, or a safe no-op). This translation unit
  * and the library sources it links are built with -DNDEBUG specifically so those
@@ -73,7 +73,7 @@ static int test_slab_double_free_is_safe_noop(void) {
     slab_release(&s, a);
     slab_release(&s, a); /* double free: detected and ignored under NDEBUG */
 
-    /* exactly one slot is free — the double free must NOT have freed a second */
+    /* exactly one slot is free; the double free must NOT have freed a second */
     void* c = slab_alloc(&s);
     ASSERT_NOT_NULL(c);
     ASSERT_NULL(slab_alloc(&s));

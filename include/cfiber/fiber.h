@@ -1,6 +1,6 @@
 /**
  * @file  fiber.h
- * @brief Convenience header — pulls in the full fiber API.
+ * @brief Convenience header: pulls in the full fiber API.
  */
 #ifndef CFIBER_CONVENIENCE_FIBER_H
 #define CFIBER_CONVENIENCE_FIBER_H

@@ -1,6 +1,6 @@
 /**
  * @file  reactor.h
- * @brief Convenience header — pulls in the epoll reactor API.
+ * @brief Convenience header: pulls in the epoll reactor API.
  */
 #ifndef CFIBER_CONVENIENCE_REACTOR_H
 #define CFIBER_CONVENIENCE_REACTOR_H

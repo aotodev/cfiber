@@ -70,7 +70,7 @@ int main(void) {
         .max_slabs = 0, /* unlimited */
     };
 
-    if (cfiber_scheduler_init(&sched, config) != 0) {
+    if (cfiber_scheduler_init(&sched, config)) {
         printf("failed to initialise scheduler\n");
         return 1;
     }

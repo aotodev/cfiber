@@ -136,7 +136,7 @@ CFIBER_EXPORT void init_fiber(fiber_t* fiber, fiber_fn func, void* user_data) __
  *          fiber's entry function returns. The implementation must:
  *            1. Mark the current fiber as completed / available for reuse.
  *            2. Select the next fiber (or the caller context) to switch to.
- *            3. Call switch_context() — it must never return normally.
+ *            3. Call switch_context(). It must never return normally.
  *
  * @warning Must not return; there is no valid return address on the stack.
  */
@@ -160,7 +160,7 @@ typedef struct {
  *
  * @details The hook is dispatched at run time rather than resolved as a link
  *          time symbol, so it works through a shared library and lets any number
- *          of schedulers share a process — each registers its own hook while it
+ *          of schedulers share a process: each registers its own hook while it
  *          runs and restores the previous one when it returns.
  *
  *          A scheduler-free user driving fibers directly with init_fiber() and

@@ -15,7 +15,7 @@ static inline void* index_to_ptr(const slab_t* slab, const uint32_t index) {
 }
 
 static inline bool bitmap_test(const bitmap_t* bitmap, const uint32_t index) {
-    return (bitmap[INDEX_BITMAP(index)] & INDEX_TO_BIT(index)) != 0;
+    return !!(bitmap[INDEX_BITMAP(index)] & INDEX_TO_BIT(index));
 }
 
 static inline void bitmap_set(bitmap_t* bitmap, const uint32_t index) {

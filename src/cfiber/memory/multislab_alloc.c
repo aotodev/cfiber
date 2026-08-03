@@ -31,7 +31,7 @@ static slab_node_t* multislab_grow(multislab_t* ms) {
     }
 
     const int res = slab_init(&node->slab, ms->block_size, mem, ms->slab_memory_size);
-    if (UNLIKELY(res != 0)) {
+    if (UNLIKELY(res)) {
         ms->mem_free(mem, ms->slab_memory_size, ms->mem_ctx);
         ms->mem_free(node, sizeof(slab_node_t), ms->mem_ctx);
         return nullptr;

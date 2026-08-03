@@ -63,7 +63,7 @@ CFIBER_NO_ASAN void cfiber_asan_on_fiber_entry(void) {
     size_t host_size = 0;
 
     /* Fresh fiber: no prior fake stack of our own to restore (NULL). The
-     * out-params yield the bounds of the stack we were switched from — always
+     * out-params yield the bounds of the stack we were switched from, always
      * the scheduler (host) stack, since fibers are only entered from it. */
     __sanitizer_finish_switch_fiber(nullptr, &host_low, &host_size);
 

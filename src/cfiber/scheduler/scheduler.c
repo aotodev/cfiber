@@ -56,7 +56,7 @@ static void task_free(cfiber_scheduler_t* s, cfiber_task_t* t) {
 }
 
 /* ============================================================================
- * builtin_return_hook  —  fiber-return hook (fiber.h contract)
+ * builtin_return_hook: fiber-return hook (fiber.h contract)
  *
  * Registered with cfiber_set_return_hook() for the duration of
  * cfiber_scheduler_run().  Called by the fiber epilogue, on the returning
@@ -112,7 +112,7 @@ int cfiber_scheduler_init_ext(cfiber_scheduler_t* sched,
     } else {
         rc = multislab_init(&sched->task_alloc, task_block, per_slab, config.max_slabs, 1);
     }
-    if (rc != 0) {
+    if (rc) {
         return rc;
     }
 
@@ -129,7 +129,7 @@ int cfiber_scheduler_init_ext(cfiber_scheduler_t* sched,
     } else {
         rc = multislab_init(&sched->stack_alloc, stack_block, per_slab, config.max_slabs, 1);
     }
-    if (rc != 0) {
+    if (rc) {
         multislab_destroy(&sched->task_alloc);
         return rc;
     }
@@ -183,7 +183,7 @@ void cfiber_scheduler_run(cfiber_scheduler_t* sched) {
     cfiber_return_hook_t prev_hook = cfiber_set_return_hook(builtin_return_hook, sched);
 
     while (sched->active_count > 0) {
-        /* Free the zombie from the previous iteration (safe — we are on the
+        /* Free the zombie from the previous iteration (safe: we are on the
          * caller's stack, not the zombie's). */
         if (sched->zombie) {
             task_free(sched, sched->zombie);

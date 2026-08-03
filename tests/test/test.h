@@ -98,11 +98,11 @@ void cfiber_run_test(const char* name, int (*fn)(void));
 #define RUN_TEST(fn) cfiber_run_test(#fn, (fn))
 
 /* ============================================================================
- * Fatal assertions — for use inside RUN_TEST functions.
+ * Fatal assertions, for use inside RUN_TEST functions.
  * On failure they record the failure and `return 1` from the test function.
  * ============================================================================ */
 
-/* NOLINTBEGIN(bugprone-macro-parentheses) — stringized args are intentional. */
+/* NOLINTBEGIN(bugprone-macro-parentheses): stringized args are intentional. */
 
 #define CFIBER_FAIL_(...)                                                                                              \
     do {                                                                                                               \
@@ -129,7 +129,7 @@ void cfiber_run_test(const char* name, int (*fn)(void));
 #define ASSERT_NULL(ptr)                                                                                               \
     do {                                                                                                               \
         const void* cfiber_p_ = (ptr);                                                                                 \
-        if (cfiber_p_ != nullptr) {                                                                                    \
+        if (cfiber_p_) {                                                                                               \
             CFIBER_FAIL_("ASSERT_NULL failed: %s = %p", #ptr, cfiber_p_);                                              \
         }                                                                                                              \
         cfiber_check_pass();                                                                                           \
@@ -138,7 +138,7 @@ void cfiber_run_test(const char* name, int (*fn)(void));
 #define ASSERT_NOT_NULL(ptr)                                                                                           \
     do {                                                                                                               \
         const void* cfiber_p_ = (ptr);                                                                                 \
-        if (cfiber_p_ == nullptr) {                                                                                    \
+        if (!cfiber_p_) {                                                                                              \
             CFIBER_FAIL_("ASSERT_NOT_NULL failed: %s is null", #ptr);                                                  \
         }                                                                                                              \
         cfiber_check_pass();                                                                                           \
@@ -187,7 +187,7 @@ void cfiber_run_test(const char* name, int (*fn)(void));
 /* NOLINTEND(bugprone-macro-parentheses) */
 
 /* ============================================================================
- * Legacy non-fatal checks — kept for the per-architecture register tests.
+ * Legacy non-fatal checks, kept for the per-architecture register tests.
  * These do NOT abort the enclosing function; they record and continue.
  * ============================================================================ */
 

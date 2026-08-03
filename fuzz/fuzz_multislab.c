@@ -5,8 +5,8 @@
  * @details
  * Interprets the input as: a small config header (block size, blocks-per-slab,
  * max-slabs, hysteresis) followed by an opcode stream of alloc / release
- * operations. Only valid operations are issued — releases always target a
- * currently-live block — so the allocator's defensive ASSERT paths (double-free,
+ * operations. Only valid operations are issued (releases always target a
+ * currently-live block), so the allocator's defensive ASSERT paths (double-free,
  * foreign pointer) are never tripped; this fuzzer hunts logic and memory bugs,
  * which ASan/UBSan and the structural invariants below surface.
  *
@@ -113,8 +113,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     counting_ctx ctx = {0};
     multislab_t ms;
-    if (multislab_init_ext(&ms, block_size, per_slab, max_slabs, hysteresis, counting_alloc, counting_free, &ctx)
-        != 0) {
+    if (multislab_init_ext(&ms, block_size, per_slab, max_slabs, hysteresis, counting_alloc, counting_free, &ctx)) {
         return 0;
     }
 

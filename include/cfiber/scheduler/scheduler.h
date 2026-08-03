@@ -8,7 +8,7 @@
  *          so no external heap (malloc/free) is required when a custom backing
  *          allocator is supplied via cfiber_scheduler_init_ext().
  *
- *          The scheduler grows dynamically as fibers are spawned — there is
+ *          The scheduler grows dynamically as fibers are spawned, so there is
  *          no compile-time limit on the number of concurrent fibers.
  *
  * @section usage Usage

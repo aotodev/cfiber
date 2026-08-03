@@ -52,7 +52,7 @@
 #define DEFAULT_FIBERS_PER_SLAB 32u
 
 /* Timer heap: a contiguous binary heap grown geometrically, std::vector style
- * (start at INIT_CAP, ×GROWTH each time it fills). */
+ * (start at INIT_CAP, multiply by GROWTH each time it fills). */
 #define TIMER_HEAP_INIT_CAP ((size_t)16)
 #define TIMER_HEAP_GROWTH 2
 
@@ -918,13 +918,12 @@ cfiber_reactor_t* cfiber_reactor_create(cfiber_reactor_config_t config) {
      * (outstanding handles point into these blocks). */
     const size_t block = align_up(sizeof(ev_fiber_t), CACHE_LINE_SIZE);
     if (multislab_init_ext(
-            &s->fibers, block, DEFAULT_FIBERS_PER_SLAB, 0, UINT32_MAX, zeroing_alloc, zeroing_free, nullptr)
-        != 0) {
+            &s->fibers, block, DEFAULT_FIBERS_PER_SLAB, 0, UINT32_MAX, zeroing_alloc, zeroing_free, nullptr)) {
         free(s);
         return nullptr;
     }
 
-    if (ring_init(&s->cmds, CMD_RING_CAP) != 0) {
+    if (ring_init(&s->cmds, CMD_RING_CAP)) {
         goto fail;
     }
 

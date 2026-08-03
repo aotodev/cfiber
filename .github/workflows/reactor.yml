@@ -1,5 +1,4 @@
-# Optional epoll(7) reactor (Linux, x86_64) under ThreadSanitizer, which covers
-# the lock-free command ring and cross-thread wake/cancel.
+# Optional epoll(7) reactor (Linux, x86_64) under ThreadSanitizer.
 name: reactor
 
 on:

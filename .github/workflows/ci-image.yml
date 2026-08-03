@@ -1,6 +1,5 @@
-# Builds and pushes the cfiber CI toolchain image to ghcr.io; the test workflows
-# only pull it. No schedule: a rebuild installs whatever Arch ships that day, so
-# toolchain bumps stay deliberate.
+# Builds and pushes the cfiber CI toolchain image to ghcr.io; the test workflows only
+# pull it. On demand only, so toolchain bumps stay deliberate.
 name: ci-image
 
 on:

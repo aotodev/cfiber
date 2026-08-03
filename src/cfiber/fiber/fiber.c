@@ -33,12 +33,12 @@ cfiber_return_hook_t cfiber_get_return_hook(void) {
  * @details Runs on the returning fiber's stack. The hook (registered via
  *          cfiber_set_return_hook()) must not return.
  */
-// NOLINTNEXTLINE(misc-use-internal-linkage): false positive — called from per-arch assembly
+// NOLINTNEXTLINE(misc-use-internal-linkage): false positive, called from per-arch assembly
 [[noreturn]] void fiber_epilogue(void) {
     ASSERT(s_return_hook.fn && "fiber returned with no fiber-return hook registered");
     s_return_hook.fn(s_return_hook.ctx);
 
-    /* Should never reach here — scheduler bug if we do. */
+    /* Should never reach here; a scheduler bug if we do. */
     ASSERT(false);
 
     for (;;) {

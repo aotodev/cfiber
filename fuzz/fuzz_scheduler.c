@@ -7,7 +7,7 @@
  * (how many times each fiber yields and how many children it spawns). It then
  * runs the scheduler to completion. Because fibers run real context switches,
  * this exercises spawn / yield / dynamic-spawn / completion and the spawn-free
- * churn of the underlying multislab allocators — under ASan (with the
+ * churn of the underlying multislab allocators, under ASan (with the
  * fiber-aware redzone + switch annotations active) and UBSan.
  *
  * Invariants checked after the run:
@@ -103,7 +103,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     counting_ctx ctx = {0};
     cfiber_scheduler_t sched;
-    if (cfiber_scheduler_init_ext(&sched, cfg, counting_alloc, counting_free, &ctx) != 0) {
+    if (cfiber_scheduler_init_ext(&sched, cfg, counting_alloc, counting_free, &ctx)) {
         return 0;
     }
 

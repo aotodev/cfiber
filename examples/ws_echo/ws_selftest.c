@@ -187,7 +187,7 @@ static void client_fiber(void* arg) {
     char resp[2048];
     CHECK(client_upgrade(fd, "/chat", resp, sizeof resp) == 0 && strstr(resp, "101"),
           "server returned 101 Switching Protocols");
-    CHECK(strstr(resp, "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") != NULL,
+    CHECK(strstr(resp, "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="),
           "server computed the correct accept key live");
 
     /* Text echo round-trips of varying small sizes. */

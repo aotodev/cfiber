@@ -16,7 +16,7 @@
  *     handler + siglongjmp);
  *   - pooled alloc/release/reuse and clean destroy.
  *
- * Hosted Linux/Unix only — the growable stack sources are not built for
+ * Hosted Linux/Unix only: the growable stack sources are not built for
  * freestanding targets. The guard-page fault test is skipped under ASan, whose
  * own SIGSEGV handling would interfere with the test's handler.
  */
@@ -67,7 +67,7 @@ static int test_growable_usable_region_writable(void) {
     uint8_t* const top = (uint8_t*)s.stack_top;
 
     /* touch one byte in every usable page: each access faults in a fresh
-     * physical page (demand paging) — this is how the stack "grows" */
+     * physical page (demand paging). This is how the stack "grows" */
     for (uint8_t* p = bottom; p < top; p += ps) {
         *p = 0x5A;
     }

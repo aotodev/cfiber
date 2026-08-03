@@ -13,7 +13,7 @@ UndefinedBehaviorSanitizer. Requires **Clang**.
 
 Each target reads libFuzzer's random bytes as an opcode stream, issues only
 valid operations (so the library's defensive `ASSERT` paths are never tripped),
-and aborts via `FUZZ_CHECK` when a structural invariant is violated — ASan/UBSan
+and aborts via `FUZZ_CHECK` when a structural invariant is violated. ASan/UBSan
 catch the memory/UB bugs, the invariants catch the logic bugs.
 
 ## Build & run

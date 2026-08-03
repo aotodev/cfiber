@@ -78,8 +78,7 @@ project_root=$(cd "${script_dir}/.." && pwd)
 cd "${project_root}"
 
 # --------------------------------------------------------------------------------------
-# Host OS / job-count detection. cfiber supports Linux hosts (and macOS in
-# practice, untested); Windows is not supported.
+# Host OS / job-count detection. Linux, or macOS unverified. Not Windows.
 # --------------------------------------------------------------------------------------
 host_os="$(uname -s)"
 case "${host_os}" in
@@ -98,9 +97,8 @@ detect_jobs() {
 }
 
 # --------------------------------------------------------------------------------------
-# Defaults. Only invariants are declared up front; everything else is set
-# conditionally by the argument parser and falls back to OFF via `${var:-OFF}`
-# at the use site, so unused options never become bound variables.
+# Defaults. Unset options stay unbound, so every use site needs `${var:-OFF}`
+# under `set -u`.
 # --------------------------------------------------------------------------------------
 build_type=Release
 target_arch="$(uname -m)"
@@ -199,12 +197,7 @@ esac
 require_tool cmake
 
 # --------------------------------------------------------------------------------------
-# AddressSanitizer validation. ASan is a hosted instrumentation kept separate
-# from the canary/watermark sanitizer (they are mutually exclusive, and target
-# different platforms). It is only wired up for the native x86_64 build here:
-# the aarch64 path runs under qemu-user, whose address-space handling does not
-# support ASan's shadow memory, and the arm path is bare metal where ASan does
-# not exist.
+# AddressSanitizer: native x86_64 only, and excludes the canary/watermark sanitizer.
 # --------------------------------------------------------------------------------------
 if [[ "${asan:-OFF}" == ON ]]; then
     if [[ "${stack_sanitizer:-OFF}" == ON ]]; then
@@ -218,9 +211,7 @@ if [[ "${asan:-OFF}" == ON ]]; then
 fi
 
 # --------------------------------------------------------------------------------------
-# UndefinedBehaviorSanitizer. Hosted only (the runtime needs a libc); unlike ASan
-# it works fine under qemu-user, so it is allowed on aarch64 as well as native
-# x86_64. The arm path is bare metal where the runtime is unavailable.
+# UndefinedBehaviorSanitizer: hosted only, but unlike ASan it works under qemu-user.
 # --------------------------------------------------------------------------------------
 if [[ "${ubsan:-OFF}" == ON ]]; then
     case "${target_arch}" in
@@ -231,9 +222,7 @@ if [[ "${ubsan:-OFF}" == ON ]]; then
 fi
 
 # --------------------------------------------------------------------------------------
-# ThreadSanitizer. Data-race detector, primarily for the reactor's lock-free
-# command ring and cross-thread wake/cancel. Like ASan it needs native x86_64
-# (qemu-user does not support it) and cannot be combined with ASan.
+# ThreadSanitizer: native x86_64 only, excludes ASan. For the reactor's ring.
 # --------------------------------------------------------------------------------------
 if [[ "${tsan:-OFF}" == ON ]]; then
     if [[ "${asan:-OFF}" == ON ]]; then
@@ -247,8 +236,7 @@ if [[ "${tsan:-OFF}" == ON ]]; then
 fi
 
 # --------------------------------------------------------------------------------------
-# Reactor. Linux-only (epoll/eventfd); excluded on the bare-metal arm target. It
-# works under qemu-user, so aarch64 is allowed alongside native x86_64.
+# Reactor: Linux only (epoll/eventfd), so hosted targets but not bare-metal arm.
 # --------------------------------------------------------------------------------------
 if [[ "${reactor:-OFF}" == ON ]]; then
     case "${target_arch}" in
@@ -258,8 +246,7 @@ if [[ "${reactor:-OFF}" == ON ]]; then
 fi
 
 # --------------------------------------------------------------------------------------
-# Build directory: one canonical path per (os, arch, cpu, config) so toggling
-# options between runs reuses the incremental build.
+# Build directory: one canonical path per (os, arch, cpu, config).
 # --------------------------------------------------------------------------------------
 build_dir="build/${host_os}/${target_arch}${target_cpu:+/${target_cpu}}/${build_type}"
 
