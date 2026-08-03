@@ -1,14 +1,14 @@
 # cfiber
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![x86_64](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/x86_64.yml/badge.svg?branch=master&label=x86_64)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=x86_64.yml)
-[![aarch64](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/aarch64.yml/badge.svg?branch=master&label=aarch64)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=aarch64.yml)
-[![cortex-m0](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m0.yml/badge.svg?branch=master&label=cortex-m0)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m0.yml)
-[![cortex-m3](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m3.yml/badge.svg?branch=master&label=cortex-m3)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m3.yml)
-[![cortex-m4](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m4.yml/badge.svg?branch=master&label=cortex-m4)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m4.yml)
-[![cortex-m7](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/cortex-m7.yml/badge.svg?branch=master&label=cortex-m7)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=cortex-m7.yml)
-[![reactor](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/reactor.yml/badge.svg?branch=master&label=reactor)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=reactor.yml)
-[![fuzz](https://git.vernizzi.io/vernizzi/cfiber/actions/workflows/fuzz.yml/badge.svg?branch=master&label=fuzz)](https://git.vernizzi.io/vernizzi/cfiber/actions?workflow=fuzz.yml)
+[![x86_64](https://github.com/aotodev/cfiber/actions/workflows/x86_64.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/x86_64.yml)
+[![aarch64](https://github.com/aotodev/cfiber/actions/workflows/aarch64.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/aarch64.yml)
+[![cortex-m0](https://github.com/aotodev/cfiber/actions/workflows/cortex-m0.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/cortex-m0.yml)
+[![cortex-m3](https://github.com/aotodev/cfiber/actions/workflows/cortex-m3.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/cortex-m3.yml)
+[![cortex-m4](https://github.com/aotodev/cfiber/actions/workflows/cortex-m4.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/cortex-m4.yml)
+[![cortex-m7](https://github.com/aotodev/cfiber/actions/workflows/cortex-m7.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/cortex-m7.yml)
+[![reactor](https://github.com/aotodev/cfiber/actions/workflows/reactor.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/reactor.yml)
+[![fuzz](https://github.com/aotodev/cfiber/actions/workflows/fuzz.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/fuzz.yml)
 
 A C library for cooperative concurrency: stackful coroutines (fibers), a
 cooperative scheduler and stack/memory allocators tuned for both hosted Linux
@@ -153,7 +153,7 @@ or `./utils/make.sh -t ...` (any target, including the QEMU flows).
 What is covered:
 
 - **Context switching**: per-architecture register-preservation tests for the
-  callee-saved set (plus S16–S31 on Cortex-M7F).
+  callee-saved set (plus S16-S31 on Cortex-M7F).
 - **Allocators**: slab and multislab: exhaustion, release/reuse, lazy growth,
   `max_slabs` caps, full/active list transitions, empty-slab hysteresis, and
   (via a counting backing allocator) that `destroy` returns every byte.
@@ -468,7 +468,8 @@ utils/
   cortex/      startup code and linker scripts for QEMU Cortex-M targets
 cmake/         toolchain files and helpers
 ci/            Containerfile for the CI toolchain image
-.forgejo/      per-target CI workflows
+.github/
+  workflows/   per-target CI workflows
 ```
 
 ## License
