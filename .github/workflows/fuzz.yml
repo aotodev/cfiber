@@ -1,0 +1,40 @@
+# Time-boxed libFuzzer smoke run for the allocator, scheduler and reactor harnesses.
+name: fuzz
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'fuzz/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.github/workflows/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aotodev/cfiber-ci:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build fuzzers
+        run: |
+          CC=clang cmake -G Ninja -B build-fuzz \
+            -DBUILD_TESTS=ON -DCFIBER_FUZZ=ON -DCFIBER_REACTOR=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build build-fuzz -j
+      - name: Smoke-run fuzzers
+        run: |
+          ./build-fuzz/fuzz/fuzz_multislab -max_total_time=45 -print_final_stats=1
+          ./build-fuzz/fuzz/fuzz_scheduler -max_total_time=45 -rss_limit_mb=4096 -print_final_stats=1
+          ./build-fuzz/fuzz/fuzz_reactor -max_total_time=45 -rss_limit_mb=4096 -print_final_stats=1

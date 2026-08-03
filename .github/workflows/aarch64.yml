@@ -1,0 +1,34 @@
+# AArch64 build + tests via the aarch64 cross toolchain, run under qemu-user.
+name: aarch64
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'fuzz/**'
+      - 'utils/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.github/workflows/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aotodev/cfiber-ci:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run tests
+        run: ./utils/make.sh -t -e --arch=aarch64 --reactor

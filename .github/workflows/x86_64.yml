@@ -1,0 +1,49 @@
+# Native x86_64 build + tests under the sanitizers.
+name: x86_64
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'fuzz/**'
+      - 'utils/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.github/workflows/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aotodev/cfiber-ci:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: asan
+            args: "-t -e -d --asan --reactor"
+          - name: ubsan
+            args: "-t -e -d --ubsan --reactor"
+          - name: stack-sanitizer
+            args: "-t -e -d --sanitizer"
+          # No -t: the whitebox tests use internal symbols a shared library does
+          # not export. The examples link the public API, so they catch that.
+          - name: shared
+            args: "-e --shared --reactor"
+    name: "x86_64 (${{ matrix.name }})"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run tests
+        run: ./utils/make.sh ${{ matrix.args }}

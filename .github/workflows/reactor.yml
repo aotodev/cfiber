@@ -1,0 +1,35 @@
+# Optional epoll(7) reactor (Linux, x86_64) under ThreadSanitizer, which covers
+# the lock-free command ring and cross-thread wake/cancel.
+name: reactor
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/reactor/**'
+      - 'examples/ws_echo/**'
+      - 'utils/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.github/workflows/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  tsan:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aotodev/cfiber-ci:latest
+    name: "reactor (tsan)"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run reactor tests under ThreadSanitizer
+        run: ./utils/make.sh -t -e -d --tsan --reactor

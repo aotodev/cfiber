@@ -1,0 +1,33 @@
+# Bare-metal ARM Cortex-M7 (with FPU) build + tests, run under qemu-system-arm.
+name: cortex-m7
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'utils/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.github/workflows/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aotodev/cfiber-ci:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run tests
+        run: ./utils/make.sh -t -e --arch=arm --cpu=cortex-m7
