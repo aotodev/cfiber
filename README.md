@@ -71,49 +71,26 @@ for nested spawns and fibers that spawn other fibers.
 non-coloured argument is more than theory. `CFIBER_REACTOR=ON` builds a
 single-threaded event loop that multiplexes many fibers over `epoll(7)`; a
 fiber that would block instead parks, and the loop resumes it when the
-descriptor is ready, a deadline elapses, or it is cancelled.
-
-```c
-static void echo(void* arg) {
-    int fd = (int)(intptr_t)arg;
-    char buf[4096];
-    for (;;) {
-        ssize_t n = cfiber_ev_read(fd, buf, sizeof buf);   /* parks on EAGAIN */
-        if (n <= 0 || cfiber_ev_write(fd, buf, (size_t)n) < 0) break;
-    }
-    close(fd);
-}
-```
-
-Everything reduces to one primitive, `cfiber_ev_wait(fd, direction, timeout)`,
-so the POSIX byte-stream helpers are a transport layer rather than the design.
-Timers are a deadline min-heap feeding the `epoll_wait` timeout; wake and cancel
-are safe from other threads through generation-tagged handles. A WebSocket
+descriptor is ready, a deadline elapses, or it is cancelled. Everything reduces
+to one primitive, `cfiber_ev_wait(fd, direction, timeout)`, so the POSIX
+byte-stream helpers are a transport layer rather than the design. A WebSocket
 (RFC 6455) echo server built on it ships in [examples/ws_echo](examples/ws_echo).
 Details in [docs/reactor.md](docs/reactor.md).
 
-**The whole library runs on bare metal.** Not a reduced subset: fibers, the
-scheduler, both allocators and the stack sanitizer all work on a Cortex-M0. Pass
-any `(alloc, free, ctx)` triple to `cfiber_scheduler_init_ext()` and `malloc` is
-never called; task records and fiber stacks come out of a region you own, with
-`max_slabs` turning exhaustion into a `false` return you can handle.
+**One API from Cortex-M0 to x86_64, bare metal included.** Not a reduced subset:
+fibers, the scheduler, both allocators and the stack sanitizer all work on a
+Cortex-M0, over ABI-compliant switches for System V AMD64, AAPCS64 and AAPCS in
+both Thumb-1 and Thumb-2. Pass any `(alloc, free, ctx)` triple to
+`cfiber_scheduler_init_ext()` and `malloc` is never called. No dependencies: the
+hosted portion uses POSIX, the freestanding portion only `<stdint.h>` and
+`<stddef.h>`. See [docs/freestanding.md](docs/freestanding.md) and
+[docs/fibers.md](docs/fibers.md).
 
-**One API from Cortex-M0 to x86_64.** ABI-compliant switches and prologues for
-System V AMD64, AAPCS64, and AAPCS in both Thumb-1 and Thumb-2, with optional
-FPU save/restore on Cortex-M4F/M7F. Only the callee-saved set is preserved, and
-the conditional halves cost nothing on targets that lack them.
-
-**Stack overflow is caught, not discovered later.** Hosted stacks are demand
-paged with a `PROT_NONE` guard page below, so an overflow faults at the
-instruction that caused it. Where there is no MMU, a canary plus a watermark
-does the same job and additionally reports real peak usage, so stack sizing
-becomes a measurement. Under `CFIBER_ASAN`, a poisoned redzone below every stack
-turns an inter-stack overflow into an immediate report, and the
-`__sanitizer_*_switch_fiber` annotations keep stack-use-after-return tracking
-correct across a hand-written context switch.
-
-**No dependencies.** The hosted portion uses POSIX (`mmap`, `mprotect`); the
-freestanding portion uses only `<stdint.h>` and `<stddef.h>`.
+**Stack overflow is caught, not discovered later.** A `PROT_NONE` guard page
+where there is an MMU, a canary plus a watermark where there is not, and a
+poisoned redzone under `CFIBER_ASAN`. The watermark also reports real peak
+usage, so stack sizing becomes a measurement rather than a guess. See
+[docs/memory.md](docs/memory.md) and [docs/sanitizers.md](docs/sanitizers.md).
 
 ## Building
 
