@@ -1,7 +1,7 @@
 # Fuzzing
 
 Coverage-guided [libFuzzer](https://llvm.org/docs/LibFuzzer.html) targets that
-exercise the allocator and scheduler under AddressSanitizer +
+exercise the allocators, the scheduler and the reactor under AddressSanitizer +
 UndefinedBehaviorSanitizer. Requires **Clang**.
 
 ## Targets
@@ -10,6 +10,10 @@ UndefinedBehaviorSanitizer. Requires **Clang**.
 |------------------|---------------------------------------------------------------------|
 | `fuzz_multislab` | slab / multislab alloc / release op-streams + structural invariants |
 | `fuzz_scheduler` | spawn / yield / dynamic-spawn / run, with leak balance              |
+| `fuzz_reactor`   | spawn / park / wake / cancel / timer op-streams on the epoll loop   |
+
+`fuzz_reactor` is built only when `CFIBER_REACTOR=ON` (Linux only); the other
+two are built whenever `CFIBER_FUZZ=ON`.
 
 Each target reads libFuzzer's random bytes as an opcode stream, issues only
 valid operations (so the library's defensive `ASSERT` paths are never tripped),
