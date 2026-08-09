@@ -2,27 +2,16 @@
  * @file  scheduler.h
  * @brief Cooperative FCFS fiber scheduler backed by multislab allocation.
  *
- * @details Provides a non-preemptive, first-come-first-served scheduler that
- *          manages fiber lifecycle entirely through the cfiber multislab
- *          allocator.  Both task metadata and fiber stacks are slab-allocated,
- *          so no external heap (malloc/free) is required when a custom backing
- *          allocator is supplied via cfiber_scheduler_init_ext().
+ * @details Non-preemptive and first-come-first-served over a FIFO ready queue.
+ *          Both task metadata and fiber stacks are slab-allocated, so no
+ *          external heap (malloc/free) is required when a custom backing
+ *          allocator is supplied via cfiber_scheduler_init_ext(). The slabs grow
+ *          as fibers are spawned, so there is no compile-time limit on the
+ *          number of concurrent fibers.
  *
- *          The scheduler grows dynamically as fibers are spawned, so there is
- *          no compile-time limit on the number of concurrent fibers.
+ * @note One scheduler per thread; fibers are not migrated between threads.
  *
- * @section usage Usage
- * @code
- * cfiber_scheduler_t sched;
- * cfiber_scheduler_init(&sched, (cfiber_scheduler_config_t){
- *     .stack_size      = 8192,
- *     .fibers_per_slab = 16,
- * });
- *
- * cfiber_scheduler_spawn(&sched, my_fiber_fn, user_data);
- * cfiber_scheduler_run(&sched);     // blocks until all fibers complete
- * cfiber_scheduler_destroy(&sched);
- * @endcode
+ * @see docs/scheduler.md
  */
 
 #ifndef CFIBER_SCHEDULER_H

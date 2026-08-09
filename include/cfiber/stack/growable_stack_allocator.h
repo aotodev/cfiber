@@ -16,8 +16,8 @@ extern "C" {
 #endif
 
 /**
- * @details Manages a cache of growable stacks that can dynamically expand
- *          using SIGSEGV handling. Recycles stacks to minimize allocation overhead.
+ * @details Manages a cache of demand-paged growable stacks. Recycling madvises the
+ *          grown pages away instead of unmapping, so reuse costs no mmap.
  */
 typedef struct growable_stack_allocator growable_stack_allocator_t;
 

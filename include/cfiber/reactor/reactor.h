@@ -8,31 +8,22 @@
  *          poller and yields), and the loop resumes it when the descriptor is
  *          ready, a deadline elapses, or it is cancelled.
  *
- *          The reactor is built only on cfiber's fiber and stack mechanism (it
- *          does not use the built-in FCFS scheduler). It registers its own
- *          fiber-return hook via cfiber_set_return_hook() while running, so it
- *          coexists with the built-in scheduler and works through a shared
- *          library.
- *
- * @section primitive The core primitive
- *          The irreducible operation is cfiber_ev_wait(fd, direction, timeout):
- *          "park the current fiber until @p fd is ready in @p direction, the
- *          timeout elapses, or the fiber is cancelled." The byte-stream helpers
- *          (cfiber_ev_read / _write / _accept / _connect) are a thin POSIX
- *          transport layer over that primitive: they loop on EAGAIN and call
- *          cfiber_ev_wait with the appropriate direction. A different transport
- *          (TLS, UDP) is just a different helper layer over the same primitive.
+ *          Does not use the built-in FCFS scheduler. It registers its own
+ *          fiber-return hook via cfiber_set_return_hook() for the duration of
+ *          cfiber_reactor_run() and restores the previous one on return, so it
+ *          coexists with other schedulers in one process.
  *
  * @section model Threading model
- *          One reactor per thread (the single-loop-per-core model). The in-fiber
- *          API operates on the calling thread's running reactor implicitly. Only
- *          cfiber_reactor_wake() and cfiber_reactor_cancel() are safe to call
- *          from another thread; everything else must run on the loop thread
- *          (typically from within a fiber).
+ *          One reactor per thread. The in-fiber API operates on the calling
+ *          thread's running reactor implicitly. Only cfiber_reactor_wake() and
+ *          cfiber_reactor_cancel() are safe to call from another thread;
+ *          everything else must run on the loop thread (typically from within a
+ *          fiber). One fiber owns a given descriptor at a time.
  *
- * @note Linux only (epoll, eventfd, timerfd-free monotonic timers). Built only
- *       when the CFIBER_REACTOR option is enabled; excluded on freestanding
- *       targets.
+ * @note Linux only (epoll, eventfd). Built only when the CFIBER_REACTOR option
+ *       is enabled; excluded on freestanding targets.
+ *
+ * @see docs/reactor.md
  */
 
 #ifndef CFIBER_REACTOR_H

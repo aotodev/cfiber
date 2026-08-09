@@ -2,14 +2,15 @@
  * @file    growable_stack.h
  *
  * @brief   Low-level MMU-based growable stack operations.
- * @details These functions work with individual stacks using mmap and SIGSEGV handling.
- *          For high-level pooled allocation, use cfiber/stack/growable_stack_allocator.h
- *          instead.
- * @warning Growable stacks are implemented using guard pages + SIGSEGV; supported on
- *          Linux and other Unix-like systems where mprotect-in-handler is known to work.
- *          Not POSIX-portable in the strict async-signal-safe sense.
- * @note    It is recommended to set fstack-clash-protection or -fstack-check flags to
- *          avoid missing pages with big stack allocations.
+ * @details These functions work with individual stacks. The mapping covers the whole
+ *          requested extent with MAP_NORESERVE, so growth is demand paging rather than
+ *          a fault handler; the PROT_NONE page below is an overflow trap, not part of
+ *          the growth path. For high-level pooled allocation, use
+ *          cfiber/stack/growable_stack_allocator.h instead.
+ * @warning Requires an MMU and the Linux mmap flags used here (MAP_NORESERVE,
+ *          MAP_STACK). Not available on freestanding targets.
+ * @note    It is recommended to set fstack-clash-protection or -fstack-check flags, as a
+ *          frame larger than a page can step over the guard page without faulting.
  */
 
 
