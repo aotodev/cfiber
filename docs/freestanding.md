@@ -103,5 +103,6 @@ usage, then size from the measurement rather than from a guess. See
 ## Test targets
 
 The bare-metal path is exercised in CI on Cortex-M0/M0+, M3, M4 and M7 under
-`qemu-system-arm`, including the M7F FPU register set. Startup code and linker
+`qemu-system-arm`, including the FPU register set on M4F (softfp) and M7F
+(hard). Startup code and linker
 scripts for those machines are in `utils/cortex/`. See [testing.md](testing.md).

@@ -4,7 +4,7 @@
 
 // void cfiber_test_switch_regs(context_t* self, context_t* other,
 //                              const uintptr_t magic[N], uintptr_t out[N])
-// Slot order: r4-r11, then s16-s31 when CFIBER_ARM_FPU (N = 8 or 24).
+// Slot order: r4-r11, then s16-s31 when __ARM_FP (N = 8 or 24).
 // Loads magic into the callee-saved set, switches, stores the set on return.
 // Nothing compiler-generated runs between load, switch and store.
 // Thumb-1 only (Cortex-M0): r8-r11 go through r4-r7.
@@ -20,7 +20,7 @@ cfiber_test_switch_regs:
     mov     r6, r10
     mov     r7, r11
     push    {r4-r7}
-#if defined(CFIBER_ARM_FPU)
+#ifdef __ARM_FP
     vpush   {s16-s31}
 #endif
     push    {r3}                    // out
@@ -37,7 +37,7 @@ cfiber_test_switch_regs:
     ldr     r5, [r2, #4]
     ldr     r6, [r2, #8]
     ldr     r7, [r2, #12]
-#if defined(CFIBER_ARM_FPU)
+#ifdef __ARM_FP
     adds    r2, r2, #32
     vldmia  r2, {s16-s31}
 #endif
@@ -54,7 +54,7 @@ cfiber_test_switch_regs:
     str     r4, [r3, #8]
     mov     r4, r11
     str     r4, [r3, #12]
-#if defined(CFIBER_ARM_FPU)
+#ifdef __ARM_FP
     adds    r3, r3, #16
     vstmia  r3, {s16-s31}
     vpop    {s16-s31}

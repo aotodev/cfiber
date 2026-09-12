@@ -121,10 +121,13 @@ typedef uint32_t word_t;
  *          Cortex-M0/M0+/M3/M4/M7 microcontrollers.
  *
  *          For Cortex-M4F/M7F with FPU:
- *            - When CFIBER_ARM_FPU is defined, floating-point registers
- *              s16-s31 are saved.
+ *            - When the compiler targets an FPU (__ARM_FP, set by -mfpu with
+ *              -mfloat-abi=softfp or hard), s16-s31 are saved as well.
  *            - Registers s0-s15 are caller-saved and not preserved.
- *            - FPU context adds ~64 bytes to context size.
+ *            - FPU context adds 64 bytes to context size.
+ *
+ *          The layout follows the compile flags, so the library and its
+ *          consumers must agree on -mfloat-abi and -mfpu.
  *
  *          Cortex-M0/M0+/M3 do not have FPU support.
  */
@@ -150,7 +153,7 @@ typedef struct {
     /** Link register (r14) - return address. */
     uint32_t lr;
 
-#if defined(CFIBER_ARM_FPU)
+#ifdef __ARM_FP
     /* Callee-saved floating point registers (Cortex-M4F, M7F) */
     float s16;
     float s17;

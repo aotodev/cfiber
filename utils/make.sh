@@ -4,6 +4,8 @@
 # Usage: ./utils/make.sh [options]
 #   -a, --arch=<arch>  Target architecture (x86_64, aarch64, arm)
 #   -c, --cpu=<cpu>    Target CPU (cortex-m0, cortex-m3, cortex-m4, cortex-m7)
+#       --float-abi=<abi>  ARM float ABI: soft, softfp, hard (cortex-m7 default: hard)
+#       --fpu=<fpu>    ARM FPU for -mfpu, e.g. fpv4-sp-d16 (cortex-m7 default: fpv5-sp-d16)
 #   -d, --debug        Build in Debug mode (default: Release)
 #   -e, --examples     Build (and run) the examples
 #   -t, --tests        Build and run unit tests
@@ -45,6 +47,9 @@ Build script for cfiber. Run from anywhere; auto-detects project root.
 Usage: $(basename "$0") [options]
   -a, --arch=<arch>  Target architecture (x86_64, aarch64, arm)
   -c, --cpu=<cpu>    Target CPU (cortex-m0, cortex-m3, cortex-m4, cortex-m7)
+      --float-abi=<abi>  ARM float ABI: soft, softfp, hard (cortex-m7 default: hard)
+      --fpu=<fpu>    ARM FPU for -mfpu, e.g. fpv4-sp-d16 (cortex-m7 default:
+                     fpv5-sp-d16); requires --float-abi=softfp or hard
   -d, --debug        Build in Debug mode (default: Release)
   -e, --examples     Build (and run) the examples
   -t, --tests        Build and run unit tests
@@ -119,6 +124,8 @@ for arg in "$@"; do
     case "${arg}" in
         -a=*|--arch=*)  target_arch="${arg#*=}" ;;
         -c=*|--cpu=*)   target_cpu="${arg#*=}" ;;
+        --float-abi=*)  float_abi="${arg#*=}" ;;
+        --fpu=*)        fpu="${arg#*=}" ;;
         -d|--debug)     build_type=Debug ;;
         -e|--examples)  build_examples=ON ;;
         -t|--tests)     build_tests=ON ;;
@@ -144,18 +151,41 @@ configure_arm_cpu() {
         cortex-m0) machine=microbit ;;
         cortex-m3) machine=mps2-an385 ;;
         cortex-m4) machine=mps2-an386 ;;
-        cortex-m7) machine=mps2-an500; fpu=fpv5-sp-d16; float_abi=hard ;;
+        cortex-m7)
+            machine=mps2-an500
+            if [[ -z "${float_abi:-}" && -z "${fpu:-}" ]]; then
+                float_abi=hard
+                fpu=fpv5-sp-d16
+            fi
+            ;;
         *)
             warn "invalid arm cpu '${1}'"
             cat >&2 <<EOF
 Supported ARM cpus:
   - cortex-m0   (board: microbit)
   - cortex-m3   (board: mps2-an385)
-  - cortex-m4   (board: mps2-an386,  no FPU)
-  - cortex-m7   (board: mps2-an500,  with FPU)
+  - cortex-m4   (board: mps2-an386,  FPU with --float-abi/--fpu)
+  - cortex-m7   (board: mps2-an500,  FPU by default)
 EOF
             exit 1
             ;;
+    esac
+
+    if [[ "${1}" == cortex-m[03] && ( -n "${float_abi:-}" || -n "${fpu:-}" ) ]]; then
+        die "${1} has no FPU; --float-abi and --fpu do not apply."
+    fi
+    case "${float_abi:-soft}" in
+        soft)
+            if [[ -n "${fpu:-}" ]]; then
+                die "--fpu requires --float-abi=softfp or --float-abi=hard."
+            fi
+            ;;
+        softfp|hard)
+            if [[ -z "${fpu:-}" ]]; then
+                die "--float-abi=${float_abi} requires --fpu (e.g. --fpu=fpv4-sp-d16)."
+            fi
+            ;;
+        *) die "invalid float ABI '${float_abi}' (soft, softfp, hard)." ;;
     esac
 }
 
@@ -193,6 +223,10 @@ EOF
         exit 1
         ;;
 esac
+
+if [[ "${target_arch}" != arm && ( -n "${float_abi:-}" || -n "${fpu:-}" ) ]]; then
+    die "--float-abi and --fpu apply to --arch=arm only."
+fi
 
 require_tool cmake
 
@@ -278,7 +312,7 @@ cmake -S "${project_root}" -B "${build_dir}" \
     ${toolchain_file:+-DCMAKE_TOOLCHAIN_FILE="${toolchain_file}"} \
     ${target_cpu:+-DCFIBER_TARGET_CPU="${target_cpu}"} \
     ${float_abi:+-DCFIBER_ARM_FLOAT_ABI="${float_abi}"} \
-    ${fpu:+-DCFIBER_ARM_FPU="${fpu}"} \
+    ${fpu:+-DCFIBER_ARM_FPU_NAME="${fpu}"} \
     -G "Unix Makefiles"
 
 # --------------------------------------------------------------------------------------

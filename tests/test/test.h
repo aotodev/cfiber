@@ -198,7 +198,7 @@ void cfiber_run_test(const char* name, int (*fn)(void));
     cfiber_check_pass();
 }
 
-#if defined(__arm__) && defined(CFIBER_ARM_FPU)
+#if defined(__arm__) && defined(__ARM_FP)
 
 static float abs_single(const float value) {
     return value >= 0.0f ? value : value * -1.0f;

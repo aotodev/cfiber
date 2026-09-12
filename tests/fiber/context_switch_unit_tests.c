@@ -112,7 +112,7 @@ static void ctx_regs(const context_t* ctx, uintptr_t out[REG_COUNT]) {
 
 #elifdef __arm__
 
-#ifdef CFIBER_ARM_FPU
+#ifdef __ARM_FP
 #define REG_COUNT 24
 #else
 #define REG_COUNT 8
@@ -123,7 +123,7 @@ static void ctx_regs(const context_t* ctx, uintptr_t out[REG_COUNT]) {
 
 static const char* const reg_names[REG_COUNT] = {
     "r4",  "r5",  "r6",  "r7",  "r8",  "r9",  "r10", "r11",
-#ifdef CFIBER_ARM_FPU
+#ifdef __ARM_FP
     "s16", "s17", "s18", "s19", "s20", "s21", "s22", "s23", "s24", "s25", "s26", "s27", "s28", "s29", "s30", "s31",
 #endif
 };
@@ -132,7 +132,7 @@ static uintptr_t ctx_sp(const context_t* ctx) {
     return ctx->sp;
 }
 
-#ifdef CFIBER_ARM_FPU
+#ifdef __ARM_FP
 static uintptr_t bits(float f) {
     uintptr_t b;
     memcpy(&b, &f, sizeof b);
@@ -149,7 +149,7 @@ static void ctx_regs(const context_t* ctx, uintptr_t out[REG_COUNT]) {
     out[5] = ctx->r9;
     out[6] = ctx->r10;
     out[7] = ctx->r11;
-#ifdef CFIBER_ARM_FPU
+#ifdef __ARM_FP
     out[8] = bits(ctx->s16);
     out[9] = bits(ctx->s17);
     out[10] = bits(ctx->s18);

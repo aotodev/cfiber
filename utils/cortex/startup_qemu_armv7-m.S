@@ -55,8 +55,8 @@ _start:
     ldr r1, =_ebss
     bl zero_bss
 
-    /* Enable the FPU (if present) before entering main */
-#if defined(CFIBER_ARM_FPU)
+    /* Enable the FPU before entering main; softfp code uses it too. */
+#ifdef __ARM_FP
     /* Grant full access to CP10 and CP11 in CPACR */
     ldr r0, =0xE000ED88       /* SCB->CPACR */
     ldr r1, [r0]

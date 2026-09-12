@@ -27,7 +27,7 @@ switch_context:
     # Save link register
     str lr, [r0], #4
 
-#if defined(CFIBER_ARM_FPU)
+#ifdef __ARM_FP
     vstmia r0!, {s16-s31}
 #endif
 
@@ -47,7 +47,7 @@ switch_context:
     # Load link register
     ldr lr, [r1], #4
 
-#if defined(CFIBER_ARM_FPU)
+#ifdef __ARM_FP
     vldmia r1!, {s16-s31}
 #endif
 
