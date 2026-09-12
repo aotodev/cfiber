@@ -31,7 +31,7 @@ set(CFIBER_TARGET_CPU "" CACHE STRING
     "Target CPU when cross-compiling for ARM (e.g. cortex-m0, cortex-m3, cortex-m4, cortex-m7)")
 
 set(CFIBER_ARM_FLOAT_ABI "" CACHE STRING "ARM float ABI (soft, softfp, hard)")
-set(CFIBER_ARM_FPU       "" CACHE STRING "ARM FPU (e.g. fpv4-sp-d16, fpv5-sp-d16)")
+set(CFIBER_ARM_FPU_NAME  "" CACHE STRING "ARM FPU forwarded to -mfpu (e.g. fpv4-sp-d16, fpv5-sp-d16)")
 
 set(CFIBER_SYSTEM_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING
     "Target arch (x86_64, aarch64, arm, ...)")
@@ -279,21 +279,19 @@ elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
     endif()
 
     # ABI/arch-affecting flags must reach every translation unit (including
-    # assembly) and the link line (libgcc multilib selection).
+    # assembly) and the link line (libgcc multilib selection). The FPU half of
+    # context_t follows the compiler's __ARM_FP, so consumers must use the same
+    # -mfloat-abi/-mfpu as the library.
     if(CFIBER_ARM_FLOAT_ABI)
         add_compile_options(-mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
         add_link_options(-mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
         target_compile_options(cfiber PRIVATE -mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
-        if(CFIBER_ARM_FLOAT_ABI STREQUAL "hard")
-            target_compile_definitions(cfiber PUBLIC CFIBER_ARM_FPU)
-            add_compile_definitions(CFIBER_ARM_FPU)
-        endif()
     endif()
 
-    if(CFIBER_ARM_FPU)
-        add_compile_options(-mfpu=${CFIBER_ARM_FPU})
-        add_link_options(-mfpu=${CFIBER_ARM_FPU})
-        target_compile_options(cfiber PRIVATE -mfpu=${CFIBER_ARM_FPU})
+    if(CFIBER_ARM_FPU_NAME)
+        add_compile_options(-mfpu=${CFIBER_ARM_FPU_NAME})
+        add_link_options(-mfpu=${CFIBER_ARM_FPU_NAME})
+        target_compile_options(cfiber PRIVATE -mfpu=${CFIBER_ARM_FPU_NAME})
     endif()
 else()
     message(FATAL_ERROR "Unsupported architecture: '${CFIBER_SYSTEM_PROCESSOR}'")

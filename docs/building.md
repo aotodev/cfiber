@@ -36,8 +36,9 @@ ctest --test-dir build
 ./utils/make.sh --arch=aarch64 -t -e               # AArch64 via qemu-user
 ./utils/make.sh --arch=arm --cpu=cortex-m0 -t      # Cortex-M0
 ./utils/make.sh --arch=arm --cpu=cortex-m3 -t      # Cortex-M3
-./utils/make.sh --arch=arm --cpu=cortex-m4 -t      # Cortex-M4
-./utils/make.sh --arch=arm --cpu=cortex-m7 -t      # Cortex-M7 with FPU
+./utils/make.sh --arch=arm --cpu=cortex-m4 -t      # Cortex-M4, soft float
+./utils/make.sh --arch=arm --cpu=cortex-m4 -t --float-abi=softfp --fpu=fpv4-sp-d16  # M4F
+./utils/make.sh --arch=arm --cpu=cortex-m7 -t      # Cortex-M7, hard float + FPU
 ./utils/make.sh --help
 ```
 
@@ -63,10 +64,15 @@ that mode.
 | `CFIBER_POSITION_INDEPENDENT_CODE`  | `OFF`   | Build the static library with `-fPIC` (ignored when shared)  |
 | `CFIBER_TARGET_CPU`                 | -       | `cortex-m0` / `cortex-m3` / `cortex-m4` / `cortex-m7`        |
 | `CFIBER_ARM_FLOAT_ABI`              | -       | `soft` / `softfp` / `hard`                                   |
-| `CFIBER_ARM_FPU`                    | -       | FPU name forwarded to `-mfpu` (e.g. `fpv5-sp-d16`)           |
+| `CFIBER_ARM_FPU_NAME`               | -       | FPU name forwarded to `-mfpu` (e.g. `fpv5-sp-d16`)           |
 | `CFIBER_SYSTEM_PROCESSOR`           | host    | Target architecture; `arm` selects the freestanding build    |
 
 `BUILD_TESTS` is the one option without the `CFIBER_` prefix.
+
+On Cortex-M the saved context includes `s16`-`s31` whenever the compiler
+targets an FPU (`__ARM_FP`, i.e. `-mfpu` with `softfp` or `hard`), so the
+library and everything linked against it must be built with the same
+`CFIBER_ARM_FLOAT_ABI` and `CFIBER_ARM_FPU_NAME`.
 
 ## Static, shared and PIC
 

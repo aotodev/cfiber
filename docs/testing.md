@@ -30,7 +30,7 @@ store. Two fibers switch to each other through the helper with different
 patterns; each checks the other's saved `context_t` slots while it is parked,
 which catches a save-side slot mix-up that a plain round trip hides. Also
 checked: stack pointer alignment at fiber entry and that the saved stack pointer
-lies inside the fiber's stack. AArch64 covers `d8`-`d15`, Cortex-M7F
+lies inside the fiber's stack. AArch64 covers `d8`-`d15`, Cortex-M4F and M7F
 `s16`-`s31`.
 
 **Allocators** (`tests/memory/`): slab and multislab exhaustion, release and
