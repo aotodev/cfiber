@@ -9,6 +9,7 @@
 [![cortex-m7](https://github.com/aotodev/cfiber/actions/workflows/cortex-m7.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/cortex-m7.yml)
 [![reactor](https://github.com/aotodev/cfiber/actions/workflows/reactor.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/reactor.yml)
 [![fuzz](https://github.com/aotodev/cfiber/actions/workflows/fuzz.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/fuzz.yml)
+[![lint](https://github.com/aotodev/cfiber/actions/workflows/lint.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/lint.yml)
 
 Stackful coroutines (fibers) for C23, with hand-written context switches, a
 cooperative scheduler and the allocators to back them. Two targets, one API:

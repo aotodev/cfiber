@@ -1,9 +1,12 @@
 # Testing
 
 Every push runs the full matrix in CI (the badges on the README): native x86_64
-under AddressSanitizer, UndefinedBehaviorSanitizer and the canary/watermark
-stack sanitizer; AArch64 under `qemu-user`; bare-metal Cortex-M0/M3/M4/M7 under
-`qemu-system-arm`; the epoll reactor on Linux; and a time-boxed fuzzing pass.
+in Release and Debug with gcc and clang, under AddressSanitizer,
+UndefinedBehaviorSanitizer and the canary/watermark stack sanitizer, plus the
+plain `cmake`/`ctest` path; AArch64 under `qemu-user`; bare-metal
+Cortex-M0/M3/M4/M7 under `qemu-system-arm`; the epoll reactor under
+ThreadSanitizer; a time-boxed fuzzing pass over a cached corpus; and the
+pre-commit linters.
 
 ```bash
 cmake -B build -DBUILD_TESTS=ON
@@ -71,7 +74,10 @@ One workflow per target, so each keeps its own badge and a failure names the
 platform without opening the log. The toolchain image (cross-compilers plus
 QEMU) is built by its own workflow and published to ghcr.io; the test workflows
 only consume it, so the per-push path never rebuilds a container. The
-Containerfile is in `ci/`.
+Containerfile is in `ci/`. The workflows pin the image by digest; the image
+workflow prints the new digest to paste in after a rebuild. Every job has a
+timeout, `make.sh` bounds each QEMU run, and the Cortex-M startup code exits
+through semihosting on an unexpected exception instead of spinning.
 
 ## Scope
 

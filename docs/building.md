@@ -28,7 +28,7 @@ ctest --test-dir build
 ./utils/make.sh -t -e --sanitizer                  # with stack sanitizer (canary)
 ./utils/make.sh -t -e --asan                       # with AddressSanitizer (x86_64)
 ./utils/make.sh -t -e --ubsan                      # with UndefinedBehaviorSanitizer
-./utils/make.sh -t --tsan                          # with ThreadSanitizer (reactor)
+./utils/make.sh -t --tsan                          # with ThreadSanitizer (implies --reactor)
 ./utils/make.sh -t --reactor                       # build + run the reactor tests
 ./utils/make.sh -t -e -d                           # Debug build
 ./utils/make.sh -t -e --shared                     # shared library

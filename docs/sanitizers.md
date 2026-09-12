@@ -94,7 +94,8 @@ changes at the call site.
 
 ## UndefinedBehaviorSanitizer
 
-`CFIBER_UBSAN=ON`, hosted only, combinable with `CFIBER_ASAN`. It is configured
+`CFIBER_UBSAN=ON`, hosted only, combinable with `CFIBER_ASAN`; `make.sh` allows it on
+native x86_64 only, the aarch64 cross toolchain ships no libubsan. It is configured
 to abort on the first finding rather than log and continue, so a CI failure
 points at the first thing that went wrong.
 

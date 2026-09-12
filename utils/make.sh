@@ -10,8 +10,8 @@
 #   -v, --verbose      Verbose build output
 #       --sanitizer    Enable the stack sanitizer (canary + watermark)
 #       --asan         Enable AddressSanitizer (hosted x86_64 only)
-#       --ubsan        Enable UndefinedBehaviorSanitizer (hosted only)
-#       --tsan         Enable ThreadSanitizer (hosted x86_64 only; excludes --asan)
+#       --ubsan        Enable UndefinedBehaviorSanitizer (hosted x86_64 only)
+#       --tsan         Enable ThreadSanitizer (hosted x86_64 only; implies --reactor)
 #       --reactor      Build + test the optional epoll reactor (Linux only)
 #       --clean        Remove the previous build directory before configuring
 #   -h, --help         Show this help message
@@ -52,10 +52,10 @@ Usage: $(basename "$0") [options]
       --sanitizer    Enable the stack sanitizer (canary + watermark)
       --asan         Enable AddressSanitizer (hosted x86_64 only; mutually
                      exclusive with --sanitizer)
-      --ubsan        Enable UndefinedBehaviorSanitizer (hosted only; may be
-                     combined with --asan)
+      --ubsan        Enable UndefinedBehaviorSanitizer (hosted x86_64 only; may
+                     be combined with --asan)
       --tsan         Enable ThreadSanitizer (hosted x86_64 only; mutually
-                     exclusive with --asan; for the reactor's concurrency)
+                     exclusive with --asan; implies --reactor)
       --shared       Build cfiber as a shared library (default: static)
       --pic          Build the static library with -fPIC (ignored with --shared)
       --reactor      Build and test the optional epoll(7) reactor (Linux only)
@@ -211,18 +211,19 @@ if [[ "${asan:-OFF}" == ON ]]; then
 fi
 
 # --------------------------------------------------------------------------------------
-# UndefinedBehaviorSanitizer: hosted only, but unlike ASan it works under qemu-user.
+# UndefinedBehaviorSanitizer: native x86_64 only, the cross toolchains ship no libubsan.
 # --------------------------------------------------------------------------------------
 if [[ "${ubsan:-OFF}" == ON ]]; then
     case "${target_arch}" in
-        x86_64|AMD64|aarch64|arm64) ;;
-        *) die "--ubsan is only supported on hosted targets (x86_64, aarch64); arm is bare metal." ;;
+        x86_64|AMD64) ;;
+        *) die "--ubsan is only supported on native x86_64 (the aarch64 cross toolchain has no libubsan; arm is bare metal)." ;;
     esac
     export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 fi
 
 # --------------------------------------------------------------------------------------
-# ThreadSanitizer: native x86_64 only, excludes ASan. For the reactor's ring.
+# ThreadSanitizer: native x86_64 only, excludes ASan. The reactor is the only
+# concurrent code, so --tsan implies --reactor.
 # --------------------------------------------------------------------------------------
 if [[ "${tsan:-OFF}" == ON ]]; then
     if [[ "${asan:-OFF}" == ON ]]; then
@@ -232,6 +233,7 @@ if [[ "${tsan:-OFF}" == ON ]]; then
         x86_64|AMD64) ;;
         *) die "--tsan is only supported on native x86_64 (qemu-user does not support ThreadSanitizer)." ;;
     esac
+    reactor=ON
     export TSAN_OPTIONS="${TSAN_OPTIONS:-halt_on_error=1:second_deadlock_stack=1}"
 fi
 
@@ -287,13 +289,17 @@ jobs=$(detect_jobs)
 cmake --build "${build_dir}" ${verbose:-} --config "${build_type}" -j"${jobs}"
 
 # --------------------------------------------------------------------------------------
-# Emulation helpers (target_arch != host)
+# Emulation helpers (target_arch != host). Guest runs are bounded: a hung test
+# fails here instead of at the CI job timeout.
 # --------------------------------------------------------------------------------------
+readonly qemu_timeout=300
+
 emulate_arm_with_qemu() {
     require_tool qemu-system-arm "Install qemu-system-arm to run the ARM binary."
+    require_tool timeout "Install GNU coreutils."
 
     info "emulating ${machine} with qemu to run ${1}"
-    qemu-system-arm \
+    timeout "${qemu_timeout}" qemu-system-arm \
         -M "${machine}" \
         -cpu "${target_cpu}" \
         -kernel "${1}" \
@@ -305,6 +311,7 @@ emulate_arm_with_qemu() {
 
 emulate_aarch64_with_qemu() {
     require_tool qemu-aarch64 "Install qemu-user (qemu-aarch64) to run the AArch64 binary."
+    require_tool timeout "Install GNU coreutils."
 
     local sysroot
     sysroot=$(aarch64-linux-gnu-gcc -print-sysroot)
@@ -313,7 +320,7 @@ emulate_aarch64_with_qemu() {
     fi
 
     info "emulating aarch64 with qemu to run ${1}"
-    qemu-aarch64 -cpu "${target_cpu}" -L "${sysroot}" "${1}"
+    timeout "${qemu_timeout}" qemu-aarch64 -cpu "${target_cpu}" -L "${sysroot}" "${1}"
 }
 
 run_executable() {

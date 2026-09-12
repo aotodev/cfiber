@@ -1,4 +1,5 @@
-# Native x86_64 build + tests under the sanitizers.
+# Native x86_64 build + tests: Release and Debug, gcc and clang, under the sanitizers,
+# plus the plain cmake/ctest path from the README.
 name: x86_64
 
 on:
@@ -26,24 +27,57 @@ concurrency:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
-      image: ghcr.io/aotodev/cfiber-ci:latest
+      image: ghcr.io/aotodev/cfiber-ci@sha256:bfce13eaad965b4a0b445f55c5fa1093aa7efb3c6edb1302fd052678e528eb16
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: asan
+          - name: release
+            cc: gcc
+            args: "-t -e --reactor"
+          - name: release-clang
+            cc: clang
+            args: "-t -e --reactor"
+          - name: debug-asan
+            cc: gcc
             args: "-t -e -d --asan --reactor"
-          - name: ubsan
-            args: "-t -e -d --ubsan --reactor"
+          - name: debug-asan-clang
+            cc: clang
+            args: "-t -e -d --asan --reactor"
+          - name: debug-ubsan
+            cc: gcc
+            args: "-t -e -d --ubsan --reactor --pic"
+          - name: debug-asan-ubsan
+            cc: clang
+            args: "-t -d --asan --ubsan"
           - name: stack-sanitizer
+            cc: gcc
             args: "-t -e -d --sanitizer"
           # No -t: the whitebox tests use internal symbols a shared library does
           # not export. The examples link the public API, so they catch that.
           - name: shared
+            cc: gcc
             args: "-e --shared --reactor"
     name: "x86_64 (${{ matrix.name }})"
+    env:
+      CC: ${{ matrix.cc }}
     steps:
       - uses: actions/checkout@v4
       - name: Build and run tests
         run: ./utils/make.sh ${{ matrix.args }}
+
+  ctest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: ghcr.io/aotodev/cfiber-ci@sha256:bfce13eaad965b4a0b445f55c5fa1093aa7efb3c6edb1302fd052678e528eb16
+    name: "x86_64 (ctest)"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure, build and run ctest
+        run: |
+          cmake -B build -DCFIBER_BUILD_EXAMPLES=ON -DBUILD_TESTS=ON
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
