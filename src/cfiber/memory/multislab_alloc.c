@@ -14,6 +14,29 @@ static void default_free(void* const ptr, size_t size, void* ctx) {
     free(ptr);
 }
 
+/* Intrusive doubly linked list, head pointer passed by address. */
+static void list_push(slab_node_t** head, slab_node_t* const node) {
+    node->next = *head;
+    node->prev = nullptr;
+    if (*head) {
+        (*head)->prev = node;
+    }
+    *head = node;
+}
+
+static void list_unlink(slab_node_t** head, slab_node_t* const node) {
+    if (node->prev) {
+        node->prev->next = node->next;
+    } else {
+        *head = node->next;
+    }
+    if (node->next) {
+        node->next->prev = node->prev;
+    }
+}
+
+/* Invariant: empty_count == number of nodes with used_count == 0. A fresh
+ * slab counts until its first allocation. */
 static slab_node_t* multislab_grow(multislab_t* ms) {
     if (ms->max_slabs && ms->slab_count >= ms->max_slabs) {
         return nullptr;
@@ -40,17 +63,16 @@ static slab_node_t* multislab_grow(multislab_t* ms) {
     node->raw_memory = mem;
     node->used_count = 0;
     node->is_full = false;
-    node->next = ms->active;
-    node->prev = nullptr;
-
-    if (ms->active) {
-        ms->active->prev = node;
-    }
-
-    ms->active = node;
+    list_push(&ms->active, node);
     ms->slab_count++;
+    ms->empty_count++;
 
     return node;
+}
+
+static void multislab_free_node(multislab_t* ms, slab_node_t* const node) {
+    ms->mem_free(node->raw_memory, ms->slab_memory_size, ms->mem_ctx);
+    ms->mem_free(node, sizeof(slab_node_t), ms->mem_ctx);
 }
 
 static slab_node_t* find_owning_slab(const multislab_t* const ms, const void* const ptr) {
@@ -110,41 +132,31 @@ int multislab_init(multislab_t* ms,
 }
 
 void* multislab_alloc(multislab_t* ms) {
-    /* try the active list */
-    if (UNLIKELY(!ms->active)) {
+    /* Slabs are moved to the full list lazily, so the active list can hold
+     * full slabs ahead of ones with space (release prepends). Walk it before
+     * growing; only an empty active list means every slab is full. */
+    void* ptr = nullptr;
+    while (ms->active) {
+        ptr = slab_alloc(&ms->active->slab);
+        if (LIKELY(ptr)) {
+            break;
+        }
+        slab_node_t* const full = ms->active;
+        list_unlink(&ms->active, full);
+        list_push(&ms->full, full);
+        full->is_full = true;
+    }
+
+    if (UNLIKELY(!ptr)) {
         if (UNLIKELY(!multislab_grow(ms))) {
             return nullptr;
         }
+        ptr = slab_alloc(&ms->active->slab);
     }
 
-    slab_node_t* node = ms->active;
-    void* ptr = slab_alloc(&node->slab);
-
-    if (UNLIKELY(!ptr)) {
-        /* this node is full, move it to the full list */
-        ms->active = node->next;
-        if (ms->active) {
-            ms->active->prev = nullptr;
-        }
-
-        node->next = ms->full;
-        node->prev = nullptr;
-        if (ms->full) {
-            ms->full->prev = node;
-        }
-        ms->full = node;
-        node->is_full = true;
-
-        /* grow and retry */
-        if (!multislab_grow(ms)) {
-            return nullptr;
-        }
-        node = ms->active;
-        ptr = slab_alloc(&node->slab);
-    }
-
-    if (LIKELY(ptr)) {
-        node->used_count++;
+    slab_node_t* const node = ms->active;
+    if (node->used_count++ == 0) {
+        ms->empty_count--;
     }
     return ptr;
 }
@@ -156,36 +168,19 @@ void multislab_release(multislab_t* const ms, void* const ptr) {
         return;
     }
 
-    /* Use the tracked list membership rather than inferring it from
-     * used_count: a slab can be full (used_count == blocks_per_slab) while
-     * still on the active list, because slabs migrate to the full list
-     * lazily on the next allocation. */
-    const bool was_full = node->is_full;
-
-    slab_release(&node->slab, ptr);
+    /* A rejected release (double free, misaligned) must not touch the
+     * bookkeeping: decrementing used_count for a block still live would let
+     * the empty-slab path free a slab in use. */
+    if (UNLIKELY(!slab_release(&node->slab, ptr))) {
+        return;
+    }
     node->used_count--;
 
-    /* If it was full, move it back to the active list */
-    if (UNLIKELY(was_full)) {
-        /* Unlink from full list */
-        if (node->prev) {
-            node->prev->next = node->next;
-        } else {
-            ms->full = node->next;
-        }
-        if (node->next) {
-            node->next->prev = node->prev;
-        }
-
-        /* Prepend to active list */
-        node->next = ms->active;
-        node->prev = nullptr;
-
-        if (ms->active) {
-            ms->active->prev = node;
-        }
-
-        ms->active = node;
+    /* Tracked membership, not inferred from used_count: a full slab can still
+     * be on the active list (see multislab_alloc). */
+    if (UNLIKELY(node->is_full)) {
+        list_unlink(&ms->full, node);
+        list_push(&ms->active, node);
         node->is_full = false;
     }
 
@@ -194,21 +189,8 @@ void multislab_release(multislab_t* const ms, void* const ptr) {
         ms->empty_count++;
 
         if (ms->empty_count > ms->max_empty_reserve && ms->slab_count > 1) {
-            /* too many empties, free this one */
-
-            /* unlink from active list */
-            if (node->prev) {
-                node->prev->next = node->next;
-            } else {
-                ms->active = node->next;
-            }
-
-            if (node->next) {
-                node->next->prev = node->prev;
-            }
-
-            ms->mem_free(node->raw_memory, ms->slab_memory_size, ms->mem_ctx);
-            ms->mem_free(node, sizeof(slab_node_t), ms->mem_ctx);
+            list_unlink(&ms->active, node);
+            multislab_free_node(ms, node);
             ms->slab_count--;
             ms->empty_count--;
         }
@@ -218,8 +200,7 @@ void multislab_release(multislab_t* const ms, void* const ptr) {
 static void free_node_list(multislab_t* ms, slab_node_t* head) {
     while (head) {
         slab_node_t* next = head->next;
-        ms->mem_free(head->raw_memory, ms->slab_memory_size, ms->mem_ctx);
-        ms->mem_free(head, sizeof(slab_node_t), ms->mem_ctx);
+        multislab_free_node(ms, head);
         head = next;
     }
 }

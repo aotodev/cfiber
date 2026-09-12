@@ -56,8 +56,12 @@ CFIBER_EXPORT int slab_init(slab_t* alloc, size_t block_size, void* memory, size
  * @brief Release a block back to the slab.
  * @param alloc The allocator to use.
  * @param block The block to release.
+ * @return true if the block was released; false if it was rejected (not from
+ *         this slab, not on a block boundary, or not currently allocated), in
+ *         which case the slab is untouched. Rejection asserts in debug builds
+ *         and is only observable with NDEBUG and CFIBER_DEFENSIVE.
  */
-CFIBER_EXPORT void slab_release(slab_t* alloc, void* block) __attribute__((nonnull(1, 2)));
+CFIBER_EXPORT bool slab_release(slab_t* alloc, void* block) __attribute__((nonnull(1, 2)));
 
 /**
  * @brief Reset the allocator bookkeeping (user still owns the backing memory).

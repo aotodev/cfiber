@@ -76,20 +76,20 @@ void* slab_alloc(slab_t* slab) {
     return index_to_ptr(slab, (uint32_t)index);
 }
 
-void slab_release(slab_t* slab, void* block) {
+bool slab_release(slab_t* slab, void* block) {
 #if CFIBER_DEFENSIVE
     const size_t total_memory_size = slab->block_size * slab->block_count;
     const uintptr_t b = (uintptr_t)block;
     const uintptr_t base = (uintptr_t)slab->memory;
     if (b < base || b >= base + total_memory_size) {
         ASSERT(false && "not our memory");
-        return;
+        return false;
     }
 
     const uintptr_t offset = b - base;
     if (offset % slab->block_size) {
         ASSERT(false && "not aligned to block boundary");
-        return;
+        return false;
     }
 #endif
 
@@ -97,11 +97,12 @@ void slab_release(slab_t* slab, void* block) {
 #if CFIBER_DEFENSIVE
     if (!bitmap_test(slab->bitmap, index)) {
         ASSERT(false && "double-free");
-        return;
+        return false;
     }
 #endif
 
     bitmap_clear(slab->bitmap, index);
+    return true;
 }
 
 void slab_reset(slab_t* alloc) {
