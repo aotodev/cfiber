@@ -20,12 +20,15 @@ cross-compile.
 
 ## What the suites cover
 
-**Context switching** (`tests/fiber/`): one register-preservation test per
-architecture. Each writes a known pattern into the full callee-saved set,
-switches away, lets another fiber clobber the registers, switches back and
-checks every one. Cortex-M7F extends this to `S16`-`S31`. These are the tests
-that would catch an assembly change that saves the wrong register or the wrong
-number of them, which nothing else would notice until it corrupted a caller.
+**Context switching** (`tests/fiber/`): register preservation across
+`switch_context`, with the register traffic in a per-architecture assembly
+helper so the compiler never owns the callee-saved set between load, switch and
+store. Two fibers switch to each other through the helper with different
+patterns; each checks the other's saved `context_t` slots while it is parked,
+which catches a save-side slot mix-up that a plain round trip hides. Also
+checked: stack pointer alignment at fiber entry and that the saved stack pointer
+lies inside the fiber's stack. AArch64 covers `d8`-`d15`, Cortex-M7F
+`s16`-`s31`.
 
 **Allocators** (`tests/memory/`): slab and multislab exhaustion, release and
 reuse, lazy growth, `max_slabs` caps, the full/active list transitions, the
