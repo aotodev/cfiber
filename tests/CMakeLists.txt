@@ -23,17 +23,17 @@ set(_cfiber_test_name "unit_tests_${CFIBER_SYSTEM_PROCESSOR}")
 if(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
     add_arm_executable(${_cfiber_test_name}
         fiber/context_switch_unit_tests.c
-        fiber/unit_tests_arm.c
+        fiber/switch_regs_arm.S
     )
 elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     add_executable(${_cfiber_test_name}
         fiber/context_switch_unit_tests.c
-        fiber/unit_tests_aarch64.c
+        fiber/switch_regs_aarch64.S
     )
 elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     add_executable(${_cfiber_test_name}
         fiber/context_switch_unit_tests.c
-        fiber/unit_tests_x86_64.c
+        fiber/switch_regs_x86_64.S
     )
 else()
     message(FATAL_ERROR "Unsupported architecture: ${CFIBER_SYSTEM_PROCESSOR}")

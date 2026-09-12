@@ -15,7 +15,7 @@ examples/
   scheduler/   built-in scheduler example (all targets, incl. bare-metal ARM)
   ws_echo/     WebSocket echo on the reactor (Linux, needs CFIBER_REACTOR)
 tests/
-  fiber/       register-preservation tests, one per architecture
+  fiber/       register-preservation tests, assembly helper per architecture
   memory/      slab + multislab allocator tests
   reactor/     epoll reactor tests
   scheduler/   scheduler tests
