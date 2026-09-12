@@ -38,17 +38,30 @@ static bool ptr_in_range(const void* p, const void* base, size_t size) {
     return v >= b && v < b + size;
 }
 
-static uint32_t list_len(const slab_node_t* n) {
-    uint32_t c = 0;
-    for (; n; n = n->next) {
-        c++;
+/* Walks one list checking prev links and is_full, accumulating its length
+ * and its number of empty slabs. */
+static bool list_ok(const slab_node_t* n, bool full, uint32_t* len, uint32_t* empties) {
+    for (const slab_node_t* prev = nullptr; n; prev = n, n = n->next) {
+        if (n->prev != prev || n->is_full != full) {
+            return false;
+        }
+        (*len)++;
+        if (n->used_count == 0) {
+            (*empties)++;
+        }
     }
-    return c;
+    return true;
 }
 
-/* slab_count must always equal len(active) + len(full). */
+/* slab_count == len(active) + len(full); empty_count == slabs with no live
+ * block; is_full and prev links agree with list membership. */
 static bool multislab_invariants_hold(const multislab_t* ms) {
-    return ms->slab_count == list_len(ms->active) + list_len(ms->full);
+    uint32_t len = 0;
+    uint32_t empties = 0;
+    if (!list_ok(ms->active, false, &len, &empties) || !list_ok(ms->full, true, &len, &empties)) {
+        return false;
+    }
+    return ms->slab_count == len && ms->empty_count == empties;
 }
 
 /* ---- counting backing allocator: proves destroy returns every byte ---- */
@@ -302,6 +315,83 @@ static int test_multislab_hysteresis_frees_empty(void) {
     return 0;
 }
 
+/* The active list can hold a full slab ahead of one with space: release
+ * prepends a formerly full slab. Allocation must scan past it rather than
+ * grow (unbounded) or fail (max_slabs). */
+static int test_multislab_alloc_scans_active_list(void) {
+    constexpr uint32_t PER_SLAB = 2;
+    for (uint32_t max_slabs = 0; max_slabs <= 2; max_slabs += 2) {
+        multislab_t ms;
+        ASSERT_EQ_U32(multislab_init(&ms, BLOCK, PER_SLAB, max_slabs, 16), 0);
+
+        void* a = multislab_alloc(&ms);
+        void* b = multislab_alloc(&ms);
+        void* c = multislab_alloc(&ms); /* slab 1 {a, b} goes to the full list */
+        ASSERT_NOT_NULL(a);
+        ASSERT_NOT_NULL(b);
+        ASSERT_NOT_NULL(c);
+        ASSERT_EQ_U32(ms.slab_count, 2);
+
+        multislab_release(&ms, a); /* slab 1 back to the active head */
+        void* d = multislab_alloc(&ms);
+        ASSERT_EQ_PTR(d, a);
+
+        /* slab 1 is full again but still heads the active list; the free
+         * block is in slab 2 */
+        void* e = multislab_alloc(&ms);
+        ASSERT_NOT_NULL(e);
+        ASSERT_NE_PTR(e, b);
+        ASSERT_NE_PTR(e, c);
+        ASSERT_NE_PTR(e, d);
+        ASSERT_EQ_U32(ms.slab_count, 2);
+        ASSERT_TRUE(multislab_invariants_hold(&ms));
+
+        if (max_slabs) {
+            ASSERT_NULL(multislab_alloc(&ms)); /* genuinely exhausted */
+        }
+
+        multislab_release(&ms, b);
+        multislab_release(&ms, c);
+        multislab_release(&ms, d);
+        multislab_release(&ms, e);
+        ASSERT_TRUE(multislab_invariants_hold(&ms));
+        multislab_destroy(&ms);
+    }
+    return 0;
+}
+
+/* empty_count must track the number of empty slabs, not the number of times
+ * a slab became empty, or the reserve is ignored after a few cycles. */
+static int test_multislab_empty_count_tracks_reuse(void) {
+    constexpr uint32_t PER_SLAB = 2;
+    multislab_t ms;
+    ASSERT_EQ_U32(multislab_init(&ms, BLOCK, PER_SLAB, 0, 1), 0); /* keep one empty */
+
+    void* a = multislab_alloc(&ms);
+    void* b = multislab_alloc(&ms);
+    ASSERT_NOT_NULL(a);
+    ASSERT_NOT_NULL(b);
+
+    /* a second slab oscillating between one block and empty */
+    for (int cycle = 0; cycle < 4; cycle++) {
+        void* c = multislab_alloc(&ms);
+        ASSERT_NOT_NULL(c);
+        ASSERT_EQ_U32(ms.slab_count, 2);
+        ASSERT_EQ_U32(ms.empty_count, 0);
+
+        multislab_release(&ms, c);
+        ASSERT_EQ_U32(ms.slab_count, 2); /* the reserve keeps it */
+        ASSERT_EQ_U32(ms.empty_count, 1);
+        ASSERT_TRUE(multislab_invariants_hold(&ms));
+    }
+
+    multislab_release(&ms, a);
+    multislab_release(&ms, b);
+    ASSERT_TRUE(multislab_invariants_hold(&ms));
+    multislab_destroy(&ms);
+    return 0;
+}
+
 static int test_multislab_single_slab_not_freed_when_empty(void) {
     multislab_t ms;
     ASSERT_EQ_U32(multislab_init(&ms, BLOCK, 4, 0, 0), 0);
@@ -369,6 +459,8 @@ int main(void) {
     RUN_TEST(test_multislab_max_slabs_cap);
     RUN_TEST(test_multislab_full_to_active_transition);
     RUN_TEST(test_multislab_hysteresis_frees_empty);
+    RUN_TEST(test_multislab_alloc_scans_active_list);
+    RUN_TEST(test_multislab_empty_count_tracks_reuse);
     RUN_TEST(test_multislab_single_slab_not_freed_when_empty);
     RUN_TEST(test_multislab_no_leak_via_counting_allocator);
 

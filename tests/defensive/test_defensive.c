@@ -70,13 +70,27 @@ static int test_slab_double_free_is_safe_noop(void) {
     ASSERT_NOT_NULL(b);
     ASSERT_NULL(slab_alloc(&s)); /* both blocks taken */
 
-    slab_release(&s, a);
-    slab_release(&s, a); /* double free: detected and ignored under NDEBUG */
+    ASSERT_TRUE(slab_release(&s, a));
+    ASSERT_FALSE(slab_release(&s, a)); /* double free: rejected under NDEBUG */
 
     /* exactly one slot is free; the double free must NOT have freed a second */
     void* c = slab_alloc(&s);
     ASSERT_NOT_NULL(c);
     ASSERT_NULL(slab_alloc(&s));
+    return 0;
+}
+
+static int test_slab_rejects_foreign_and_misaligned(void) {
+    alignas(BLOCK) uint8_t mem[BLOCK * 2];
+    alignas(BLOCK) uint8_t other[BLOCK];
+    slab_t s;
+    ASSERT_EQ_U32(slab_init(&s, BLOCK, mem, sizeof(mem)), 0);
+
+    void* a = slab_alloc(&s);
+    ASSERT_NOT_NULL(a);
+    ASSERT_FALSE(slab_release(&s, other));
+    ASSERT_FALSE(slab_release(&s, (uint8_t*)a + 1));
+    ASSERT_TRUE(slab_release(&s, a));
     return 0;
 }
 
@@ -102,6 +116,43 @@ static int test_multislab_foreign_release_is_noop(void) {
 
     /* the genuine block still releases cleanly afterwards */
     multislab_release(&ms, p);
+    multislab_destroy(&ms);
+    return 0;
+}
+
+/* A rejected release must not reach the multislab's bookkeeping: with the
+ * count decremented anyway, the slab reads as empty and is freed under b. */
+static int test_multislab_double_release_keeps_live_slab(void) {
+    constexpr uint32_t PER_SLAB = 2;
+    multislab_t ms;
+    ASSERT_EQ_U32(multislab_init(&ms, BLOCK, PER_SLAB, 0, 0), 0); /* free empties eagerly */
+
+    void* a = multislab_alloc(&ms);
+    void* b = multislab_alloc(&ms);
+    void* c = multislab_alloc(&ms); /* second slab, so slab 1 is freeable */
+    ASSERT_NOT_NULL(a);
+    ASSERT_NOT_NULL(b);
+    ASSERT_NOT_NULL(c);
+    ASSERT_EQ_U32(ms.slab_count, 2);
+
+    multislab_release(&ms, a);
+    multislab_release(&ms, a); /* double free */
+    ASSERT_EQ_U32(ms.slab_count, 2);
+    ASSERT_EQ_U32(ms.empty_count, 0);
+
+    /* b's slab is intact: its one free block comes back, then slab 2's */
+    void* d = multislab_alloc(&ms);
+    void* e = multislab_alloc(&ms);
+    ASSERT_EQ_PTR(d, a);
+    ASSERT_NOT_NULL(e);
+    ASSERT_NE_PTR(e, b);
+    ASSERT_NE_PTR(e, c);
+    ASSERT_EQ_U32(ms.slab_count, 2);
+
+    multislab_release(&ms, b);
+    multislab_release(&ms, c);
+    multislab_release(&ms, d);
+    multislab_release(&ms, e);
     multislab_destroy(&ms);
     return 0;
 }
@@ -151,7 +202,9 @@ int main(void) {
 
     RUN_TEST(test_slab_init_rejects_bad_params);
     RUN_TEST(test_slab_double_free_is_safe_noop);
+    RUN_TEST(test_slab_rejects_foreign_and_misaligned);
     RUN_TEST(test_multislab_foreign_release_is_noop);
+    RUN_TEST(test_multislab_double_release_keeps_live_slab);
     RUN_TEST(test_growable_create_rejects_bad_args);
     RUN_TEST(test_growable_destroy_reports_leak);
 
