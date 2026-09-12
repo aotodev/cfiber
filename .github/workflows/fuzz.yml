@@ -1,4 +1,5 @@
 # Time-boxed libFuzzer smoke run for the allocator, scheduler and reactor harnesses.
+# The corpus is cached across runs so coverage accumulates.
 name: fuzz
 
 on:
@@ -23,10 +24,18 @@ concurrency:
 jobs:
   fuzz-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
-      image: ghcr.io/aotodev/cfiber-ci:latest
+      image: ghcr.io/aotodev/cfiber-ci@sha256:bfce13eaad965b4a0b445f55c5fa1093aa7efb3c6edb1302fd052678e528eb16
     steps:
       - uses: actions/checkout@v4
+      # Unique key so every run saves; restore-keys picks up the newest.
+      - name: Restore fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: fuzz-corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
       - name: Build fuzzers
         run: |
           CC=clang cmake -G Ninja -B build-fuzz \
@@ -35,6 +44,8 @@ jobs:
           cmake --build build-fuzz -j
       - name: Smoke-run fuzzers
         run: |
-          ./build-fuzz/fuzz/fuzz_multislab -max_total_time=45 -print_final_stats=1
-          ./build-fuzz/fuzz/fuzz_scheduler -max_total_time=45 -rss_limit_mb=4096 -print_final_stats=1
-          ./build-fuzz/fuzz/fuzz_reactor -max_total_time=45 -rss_limit_mb=4096 -print_final_stats=1
+          mkdir -p fuzz-corpus/multislab fuzz-corpus/scheduler fuzz-corpus/reactor
+          flags="-max_total_time=45 -rss_limit_mb=4096 -print_final_stats=1"
+          ./build-fuzz/fuzz/fuzz_multislab $flags fuzz-corpus/multislab
+          ./build-fuzz/fuzz/fuzz_scheduler $flags fuzz-corpus/scheduler
+          ./build-fuzz/fuzz/fuzz_reactor $flags fuzz-corpus/reactor

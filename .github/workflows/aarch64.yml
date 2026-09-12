@@ -26,9 +26,19 @@ concurrency:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container:
-      image: ghcr.io/aotodev/cfiber-ci:latest
+      image: ghcr.io/aotodev/cfiber-ci@sha256:bfce13eaad965b4a0b445f55c5fa1093aa7efb3c6edb1302fd052678e528eb16
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            args: "-t -e --arch=aarch64 --reactor"
+          - name: stack-sanitizer
+            args: "-t -e -d --arch=aarch64 --sanitizer"
+    name: "aarch64 (${{ matrix.name }})"
     steps:
       - uses: actions/checkout@v4
       - name: Build and run tests
-        run: ./utils/make.sh -t -e --arch=aarch64 --reactor
+        run: ./utils/make.sh ${{ matrix.args }}

@@ -139,13 +139,14 @@ zero_done:
     bx lr
 
 /*
- * Default handlers for system exceptions.
- * These are defined as weak symbols, so they can be overridden by user-defined functions.
- * They default to an infinite loop, which is useful for debugging unexpected faults.
+ * Default exception handlers, weak so a test can override them. An unexpected
+ * exception exits through semihosting with a code distinct from a failed
+ * test's 1, instead of spinning until the CI job timeout.
  */
 .thumb_func
 Default_Handler:
-    b .
+    movs r0, #2
+    bl _exit
 
 .weak NMI_Handler
 .thumb_set NMI_Handler, Default_Handler
