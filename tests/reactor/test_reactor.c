@@ -18,6 +18,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
@@ -481,6 +482,106 @@ static int test_concurrency_stress(void) {
 }
 
 /* ============================================================================
+ * lifecycle: destroy with live fibers, run failure, run twice
+ * ============================================================================ */
+
+/* Fibers spawned but never run: destroy must release their stacks (LSan/ASan
+ * verify) instead of tripping the stack pool's leak check. */
+static int test_destroy_without_run(void) {
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, trivial_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, trivial_fiber, nullptr, nullptr));
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* The reactor's epoll descriptor is private; find it through /proc so a fiber
+ * can break the poller from the inside. The test process has exactly one. */
+static int find_epoll_fd(void) {
+    for (int fd = 3; fd < 1024; fd++) {
+        char path[64];
+        char target[64];
+        snprintf(path, sizeof path, "/proc/self/fd/%d", fd);
+        ssize_t n = readlink(path, target, sizeof target - 1);
+        if (n > 0) {
+            target[n] = '\0';
+            if (strcmp(target, "anon_inode:[eventpoll]") == 0) {
+                return fd;
+            }
+        }
+    }
+    return -1;
+}
+
+static int g_broken_epfd;
+
+static void break_poller_fiber(void* arg) {
+    (void)arg;
+    g_broken_epfd = find_epoll_fd();
+    if (g_broken_epfd >= 0) {
+        close(g_broken_epfd);
+    }
+    (void)cfiber_ev_spawn(trivial_fiber, nullptr, nullptr); /* ready, never runs */
+}
+
+static cfiber_ev_status_t g_parked_forever_st;
+
+static void parked_forever_fiber(void* arg) {
+    (void)arg;
+    g_parked_forever_st = cfiber_ev_wait_async(-1);
+}
+
+/* run must report the poller failure instead of returning as if complete, and
+ * destroy must then tear down the parked and the ready fiber. */
+static int test_run_reports_poller_failure(void) {
+    g_broken_epfd = -1;
+    g_parked_forever_st = CFIBER_EV_READY;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, parked_forever_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, break_poller_fiber, nullptr, nullptr));
+
+    errno = 0;
+    const int rc = cfiber_reactor_run(r);
+    ASSERT_TRUE(g_broken_epfd >= 0);
+    ASSERT_EQ_U32((uint32_t)rc, (uint32_t)-1);
+    ASSERT_EQ_U32(errno, EBADF);
+    ASSERT_EQ_U32(g_parked_forever_st, CFIBER_EV_READY); /* never resumed */
+
+    cfiber_reactor_destroy(r); /* one parked, one ready: forced teardown */
+    return 0;
+}
+
+static int g_runs_seen;
+
+static void count_run_fiber(void* arg) {
+    (void)arg;
+    g_runs_seen++;
+}
+
+static int test_run_twice(void) {
+    g_runs_seen = 0;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+
+    ASSERT_TRUE(cfiber_reactor_spawn(r, count_run_fiber, nullptr, nullptr));
+    ASSERT_EQ_U32(cfiber_reactor_run(r), 0);
+    ASSERT_EQ_U32(g_runs_seen, 1);
+
+    ASSERT_EQ_U32(cfiber_reactor_run(r), 0); /* nothing to do */
+
+    ASSERT_TRUE(cfiber_reactor_spawn(r, count_run_fiber, nullptr, nullptr));
+    ASSERT_EQ_U32(cfiber_reactor_run(r), 0);
+    ASSERT_EQ_U32(g_runs_seen, 2);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
  * loop fairness: yield loops must not starve timers, I/O or commands
  * ============================================================================ */
 
@@ -885,6 +986,9 @@ int main(void) {
     RUN_TEST(test_inproc_wake_cancel);
     RUN_TEST(test_ring_stress);
     RUN_TEST(test_concurrency_stress);
+    RUN_TEST(test_destroy_without_run);
+    RUN_TEST(test_run_reports_poller_failure);
+    RUN_TEST(test_run_twice);
     RUN_TEST(test_yield_spin_lets_timer_fire);
     RUN_TEST(test_pingpong_does_not_starve_io);
     RUN_TEST(test_post_backpressure);

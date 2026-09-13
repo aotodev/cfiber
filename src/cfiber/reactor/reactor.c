@@ -82,6 +82,11 @@ struct cfiber_reactor_fiber {
 
     struct cfiber_reactor_fiber* next; /* ready-queue / free-list link */
 
+    /* Every spawned, not yet recycled fiber, so destroy can release the
+     * stacks of fibers the loop never finished. */
+    struct cfiber_reactor_fiber* live_next;
+    struct cfiber_reactor_fiber* live_prev;
+
     fiber_state_t state;
     uint64_t generation; /* bumped on recycle; matches handle.gen. 64-bit so it
                           * cannot wrap within the reactor's lifetime, even under
@@ -132,6 +137,7 @@ struct cfiber_reactor {
 
     ev_fiber_t* ready_head;
     ev_fiber_t* ready_tail;
+    ev_fiber_t* live_head;
 
     /* Fiber-struct pool. Grow-only: empty slabs are retained (never returned to
      * the OS) because handles point into these blocks and may outlive their
@@ -675,6 +681,26 @@ static ev_fiber_t* fiber_obtain(cfiber_reactor_t* s) {
     return f;
 }
 
+static void live_link(cfiber_reactor_t* s, ev_fiber_t* f) {
+    f->live_prev = nullptr;
+    f->live_next = s->live_head;
+    if (s->live_head) {
+        s->live_head->live_prev = f;
+    }
+    s->live_head = f;
+}
+
+static void live_unlink(cfiber_reactor_t* s, ev_fiber_t* f) {
+    if (f->live_prev) {
+        f->live_prev->live_next = f->live_next;
+    } else {
+        s->live_head = f->live_next;
+    }
+    if (f->live_next) {
+        f->live_next->live_prev = f->live_prev;
+    }
+}
+
 /* Return a struct to the pool (invalidating outstanding handles) without
  * touching its stack; used when no stack was ever attached. */
 static void fiber_repool(cfiber_reactor_t* s, ev_fiber_t* f) {
@@ -685,6 +711,7 @@ static void fiber_repool(cfiber_reactor_t* s, ev_fiber_t* f) {
 
 static void fiber_recycle(cfiber_reactor_t* s, ev_fiber_t* f) {
     detach_fd(s, f); /* a registration left by the last wait */
+    live_unlink(s, f);
     growable_stack_release(s->stacks, &f->stack);
     fiber_repool(s, f);
 }
@@ -826,6 +853,7 @@ static bool spawn_locked(cfiber_reactor_t* s, cfiber_reactor_fn fn, void* arg, c
     memset(&f->fiber.ctx, 0, sizeof(context_t));
 
     init_fiber(&f->fiber, (fiber_fn)fn, arg);
+    live_link(s, f);
     enqueue(s, f);
     s->active++;
 
@@ -922,12 +950,17 @@ static void fire_expired_timers(cfiber_reactor_t* s) {
     }
 }
 
-void cfiber_reactor_run(cfiber_reactor_t* r) {
+int cfiber_reactor_run(cfiber_reactor_t* r) {
     cfiber_reactor_t* s = r;
+    if (g_reactor) {
+        errno = EBUSY; /* a reactor is already running on this thread */
+        return -1;
+    }
     g_reactor = s;
     cfiber_return_hook_t prev_hook = cfiber_set_return_hook(reactor_return_hook, s);
 
     struct epoll_event evs[64];
+    int rc = 0;
 
     while (s->active > 0) {
         /* One round: the fibers ready now. Those enqueued meanwhile (yields,
@@ -949,9 +982,8 @@ void cfiber_reactor_run(cfiber_reactor_t* r) {
         if (s->active == 0) {
             break;
         }
-        if (!s->ready_head && s->blocked == 0) {
-            break; /* no ready fibers, none parked: nothing to wait for */
-        }
+        /* active == ready + parked here, so something is always waitable. */
+        ASSERT(s->ready_head || s->blocked > 0);
 
         /* Zero timeout while there is runnable work; block only when idle. */
         const int timeout_ms = s->ready_head ? 0 : next_timeout_ms(s);
@@ -960,6 +992,7 @@ void cfiber_reactor_run(cfiber_reactor_t* r) {
             if (errno == EINTR) {
                 continue;
             }
+            rc = -1; /* errno from epoll_wait; live fibers stay parked/ready */
             break;
         }
 
@@ -983,6 +1016,7 @@ void cfiber_reactor_run(cfiber_reactor_t* r) {
 
     cfiber_set_return_hook(prev_hook.fn, prev_hook.ctx);
     g_reactor = nullptr;
+    return rc;
 }
 
 /* ============================================================================
@@ -1087,6 +1121,15 @@ void cfiber_reactor_destroy(cfiber_reactor_t* r) {
     if (!s) {
         return;
     }
+    ASSERT(g_reactor != s && "destroying the running reactor");
+
+    /* Forced teardown: fibers the loop never finished (never run, or left
+     * parked/ready by a failed run) are discarded without resuming, so their
+     * stacks are released here rather than leaked. */
+    for (ev_fiber_t* f = s->live_head; f; f = f->live_next) {
+        growable_stack_release(s->stacks, &f->stack);
+    }
+    s->live_head = nullptr;
 
     multislab_destroy(&s->fibers); /* frees every fiber block */
     ring_destroy(&s->cmds);
@@ -1094,7 +1137,9 @@ void cfiber_reactor_destroy(cfiber_reactor_t* r) {
     free((void*)s->fd_owner);
 
     if (s->stacks) {
-        growable_stack_allocator_destroy(s->stacks);
+        const int leaked = growable_stack_allocator_destroy(s->stacks);
+        ASSERT(leaked == 0);
+        (void)leaked;
     }
     if (s->evfd >= 0) {
         close(s->evfd);

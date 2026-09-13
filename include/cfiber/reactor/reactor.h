@@ -57,7 +57,9 @@ struct cfiber_reactor_fiber;
  * @details Remains valid for the fiber's whole lifetime and is safe to hold
  *          (and to pass to cfiber_reactor_wake() / cfiber_reactor_cancel()) even
  *          after the fiber has completed; operations on a stale handle are
- *          no-ops. Treat the fields as opaque.
+ *          no-ops. It does not keep the reactor alive: the reactor must outlive
+ *          every thread that may still use a handle on it. Treat the fields as
+ *          opaque.
  */
 typedef struct {
     struct cfiber_reactor_fiber* f;
@@ -92,7 +94,15 @@ typedef struct {
  */
 CFIBER_EXPORT cfiber_reactor_t* cfiber_reactor_create(cfiber_reactor_config_t config);
 
-/** @brief Destroys a reactor and releases its resources. NULL-safe. */
+/**
+ * @brief Destroys a reactor and releases its resources. NULL-safe.
+ * @details Fibers the loop never finished (never run, or left parked or ready
+ *          by a failed cfiber_reactor_run()) are discarded without resuming:
+ *          their stacks are released, their functions never continue, so any
+ *          descriptor or heap block they hold is not released by them. Must
+ *          not be called from the loop thread while the reactor is running,
+ *          nor concurrently with cfiber_reactor_wake() / _cancel() on it.
+ */
 CFIBER_EXPORT void cfiber_reactor_destroy(cfiber_reactor_t* r);
 
 /**
@@ -108,9 +118,14 @@ cfiber_reactor_spawn(cfiber_reactor_t* r, cfiber_reactor_fn fn, void* arg, cfibe
  * @brief Runs the event loop until every fiber has completed.
  * @details Registers the reactor's fiber-return hook for the duration of the
  *          call and restores the previous hook on return. Blocks the calling
- *          thread.
+ *          thread. May be called again after it returns, e.g. to run fibers
+ *          spawned in between.
+ * @return 0 when every fiber has completed; -1 with errno set if the loop
+ *         stopped early (the poller failed, or a reactor is already running on
+ *         this thread: EBUSY). Fibers still live after a failure are torn down
+ *         by cfiber_reactor_destroy().
  */
-CFIBER_EXPORT void cfiber_reactor_run(cfiber_reactor_t* r) __attribute__((nonnull(1)));
+CFIBER_EXPORT int cfiber_reactor_run(cfiber_reactor_t* r) __attribute__((nonnull(1)));
 
 /* ============================================================================
  * Cross-thread control (safe from any thread)
