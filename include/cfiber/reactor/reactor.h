@@ -18,7 +18,9 @@
  *          thread's running reactor implicitly. Only cfiber_reactor_wake() and
  *          cfiber_reactor_cancel() are safe to call from another thread;
  *          everything else must run on the loop thread (typically from within a
- *          fiber). One fiber owns a given descriptor at a time.
+ *          fiber). One fiber waits on a given descriptor at a time; between
+ *          waits a descriptor may be handed to another fiber. Close a
+ *          descriptor another fiber may be parked on with cfiber_ev_close().
  *
  * @note Linux only (epoll, eventfd). Built only when the CFIBER_REACTOR option
  *       is enabled; excluded on freestanding targets.
@@ -162,7 +164,12 @@ CFIBER_EXPORT void cfiber_ev_yield(void);
  * @param direction  EPOLLIN and/or EPOLLOUT.
  * @param timeout_ns Deadline in nanoseconds from now, or a negative value for no
  *                   timeout.
- * @return One of cfiber_ev_status_t.
+ * @return One of cfiber_ev_status_t. CFIBER_EV_ERROR with errno == EBUSY if
+ *         another fiber is parked on @p fd.
+ *
+ * @details The poller registration follows the waiter: a descriptor handed to
+ *          another fiber is taken over on its first wait, and a fiber that
+ *          finishes leaves none behind.
  */
 CFIBER_EXPORT cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns);
 
@@ -194,6 +201,18 @@ CFIBER_EXPORT ssize_t cfiber_ev_write_timed(int fd, const void* buf, size_t n, i
 
 /** @brief Utility: put @p fd into non-blocking mode. */
 CFIBER_EXPORT int cfiber_ev_set_nonblocking(int fd);
+
+/**
+ * @brief Closes @p fd after cancelling a fiber parked on it.
+ * @details The kernel drops a poller registration on the last close, silently,
+ *          so a plain close() of a descriptor another fiber is parked on leaves
+ *          that fiber parked forever. This cancels such a waiter first (it
+ *          resumes with CFIBER_EV_CANCELLED; a transport helper returns -1 with
+ *          errno == ECANCELED), drops the registration and closes. Call from
+ *          the loop thread.
+ * @return close()'s result.
+ */
+CFIBER_EXPORT int cfiber_ev_close(int fd);
 
 #ifdef __cplusplus
 }

@@ -98,6 +98,7 @@ primitive rather than a change to the reactor.
 | `cfiber_ev_wait_async` | fiber | Park until woken, with no descriptor |
 | `cfiber_ev_read` / `_write` / `_accept` / `_connect` | fiber | POSIX transport |
 | `cfiber_ev_read_timed` / `_write_timed` | fiber | The same with a deadline |
+| `cfiber_ev_close` | fiber | Close, cancelling a parked waiter first |
 | `cfiber_ev_set_nonblocking` | anywhere | Utility |
 
 The in-fiber `cfiber_ev_*` calls operate on the calling thread's running reactor
@@ -130,12 +131,25 @@ nothing. A handle is therefore safe to hold indefinitely, which is what makes
 cross-thread control possible at all without a lock around the fiber's
 lifetime.
 
+## Descriptor ownership
+
+One fiber waits on a given descriptor at a time; a second waiter gets
+`CFIBER_EV_ERROR` with `EBUSY`. Between waits a descriptor moves freely: the
+fiber that did the handshake can hand the socket to a fiber it spawns and exit.
+The poller registration follows the waiter and is dropped when a fiber
+finishes, so nothing is released by hand.
+
+Closing needs care. The kernel drops a registration on the last `close()`,
+silently, so a plain `close()` of a descriptor another fiber is parked on
+leaves that fiber parked forever. Use `cfiber_ev_close()` when a waiter may
+exist: it cancels the waiter, which sees `ECANCELED`, then closes. A descriptor
+only its own fiber ever waited on needs just `close()`.
+
 ## Scope
 
-One reactor per thread, the single-loop-per-core model, and one fiber owns a
-given descriptor at a time. The full-duplex reader plus writer split (two fibers
-on one fd) and non-POSIX transports are future work that the `cfiber_ev_wait`
-primitive is designed to accommodate.
+One reactor per thread, the single-loop-per-core model. The full-duplex reader
+plus writer split (two fibers on one fd) and non-POSIX transports are future
+work that the `cfiber_ev_wait` primitive is designed to accommodate.
 
 ## Example and testing
 

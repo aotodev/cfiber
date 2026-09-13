@@ -16,9 +16,11 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
@@ -470,6 +472,265 @@ static int test_concurrency_stress(void) {
 }
 
 /* ============================================================================
+ * descriptor ownership: handoff, close-and-reuse, peer close, close of a
+ * parked descriptor
+ * ============================================================================ */
+
+/* A does the first read on fd and hands the descriptor to a fiber it spawns,
+ * then exits. B's wait must take over A's registration, not fail with EEXIST. */
+typedef struct {
+    int fd;
+    ssize_t first_n;  /* A's read */
+    ssize_t second_n; /* B's read */
+    int second_errno;
+    char second[8];
+} handoff_state_t;
+
+static handoff_state_t g_handoff;
+
+static void handoff_second_fiber(void* arg) {
+    handoff_state_t* h = arg;
+    h->second_n = cfiber_ev_read(h->fd, h->second, sizeof h->second);
+    h->second_errno = errno;
+    close(h->fd);
+}
+
+static void handoff_first_fiber(void* arg) {
+    handoff_state_t* h = arg;
+    char buf[8];
+    h->first_n = cfiber_ev_read(h->fd, buf, sizeof buf); /* parks, then wakes */
+    (void)cfiber_ev_spawn(handoff_second_fiber, h, nullptr);
+    /* A exits while its registration for h->fd is still in the poller. */
+}
+
+static void handoff_writer_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    cfiber_ev_yield(); /* let A park */
+    (void)cfiber_ev_write(fd, "one", 3);
+    (void)cfiber_ev_sleep((uint64_t)ms_to_ns(10)); /* let A finish and B park */
+    (void)cfiber_ev_write(fd, "two", 3);
+    close(fd);
+}
+
+static int test_fd_handoff(void) {
+    memset(&g_handoff, 0, sizeof g_handoff);
+    g_handoff.second_n = -2;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+    g_handoff.fd = fds[0];
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, handoff_first_fiber, &g_handoff, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, handoff_writer_fiber, (void*)(intptr_t)fds[1], nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_handoff.first_n, 3);
+    ASSERT_EQ_U32(g_handoff.second_n, 3);
+    ASSERT_TRUE(memcmp(g_handoff.second, "two", 3) == 0);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* One fiber parks on a pair, closes it, opens a new pair that gets the same
+ * descriptor numbers, and parks again. The kernel dropped the registration on
+ * close; the second wait must not fail with ENOENT. */
+typedef struct {
+    int peer;     /* the writer's end for the current round */
+    int reused;   /* second pair reused the first pair's numbers */
+    ssize_t n[2]; /* bytes read per round */
+    int err[2];
+} reuse_state_t;
+
+static reuse_state_t g_reuse;
+
+static void reuse_reader_fiber(void* arg) {
+    reuse_state_t* st = arg;
+    int first[2];
+    if (make_pair(first) < 0) {
+        return;
+    }
+    char buf[8];
+    st->peer = first[1];
+    st->n[0] = cfiber_ev_read(first[0], buf, sizeof buf); /* parks */
+    st->err[0] = errno;
+    close(first[0]);
+    close(first[1]);
+
+    int second[2];
+    if (make_pair(second) < 0) {
+        return;
+    }
+    st->reused = second[0] == first[0] && second[1] == first[1];
+    st->peer = second[1];
+    st->n[1] = cfiber_ev_read(second[0], buf, sizeof buf); /* parks on the reused number */
+    st->err[1] = errno;
+    close(second[0]);
+    close(second[1]);
+}
+
+static void reuse_writer_fiber(void* arg) {
+    reuse_state_t* st = arg;
+    for (int round = 0; round < 2; round++) {
+        (void)cfiber_ev_sleep((uint64_t)ms_to_ns(10)); /* let the reader park */
+        (void)write(st->peer, "x", 1);
+    }
+}
+
+static int test_fd_close_and_reuse(void) {
+    memset(&g_reuse, 0, sizeof g_reuse);
+    g_reuse.n[0] = -2;
+    g_reuse.n[1] = -2;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, reuse_reader_fiber, &g_reuse, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, reuse_writer_fiber, &g_reuse, nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_TRUE(g_reuse.reused); /* lowest free numbers: the scenario is real */
+    ASSERT_EQ_U32(g_reuse.n[0], 1);
+    ASSERT_EQ_U32(g_reuse.n[1], 1);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* Peer closes without writing: the parked reader wakes and read returns 0. */
+static ssize_t g_hup_n;
+
+static void hup_reader_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    char buf[8];
+    g_hup_n = cfiber_ev_read(fd, buf, sizeof buf);
+    close(fd);
+}
+
+static void hup_closer_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    cfiber_ev_yield(); /* let the reader park */
+    close(fd);
+}
+
+static int test_peer_close_reads_zero(void) {
+    g_hup_n = -2;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, hup_reader_fiber, (void*)(intptr_t)fds[0], nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, hup_closer_fiber, (void*)(intptr_t)fds[1], nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_hup_n, 0);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* Another fiber closes the descriptor a reader is parked on through
+ * cfiber_ev_close: the reader resumes with ECANCELED, well before its deadline
+ * (which only bounds the test if the cancel is lost). */
+static ssize_t g_closed_n;
+static int g_closed_errno;
+static int g_closed_rc;
+
+static void closed_reader_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    char buf[8];
+    g_closed_n = cfiber_ev_read_timed(fd, buf, sizeof buf, ms_to_ns(500));
+    g_closed_errno = errno;
+}
+
+static void closer_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    cfiber_ev_yield(); /* let the reader park */
+    g_closed_rc = cfiber_ev_close(fd);
+}
+
+static int test_close_parked_fd(void) {
+    g_closed_n = -2;
+    g_closed_errno = 0;
+    g_closed_rc = -2;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, closed_reader_fiber, (void*)(intptr_t)fds[0], nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, closer_fiber, (void*)(intptr_t)fds[0], nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_closed_rc, 0);
+    ASSERT_EQ_U32((uint32_t)(int)g_closed_n, (uint32_t)-1);
+    ASSERT_EQ_U32(g_closed_errno, ECANCELED);
+
+    close(fds[1]);
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* A second fiber waiting on a descriptor another fiber is parked on is
+ * refused with EBUSY rather than silently stealing the wait. */
+static cfiber_ev_status_t g_busy_st;
+static int g_busy_errno;
+static ssize_t g_busy_first_n;
+
+static void busy_first_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    char buf[8];
+    g_busy_first_n = cfiber_ev_read(fd, buf, sizeof buf);
+}
+
+static void busy_second_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    cfiber_ev_yield(); /* let the first fiber park */
+    g_busy_st = cfiber_ev_wait(fd, EPOLLIN, -1);
+    g_busy_errno = errno;
+}
+
+static void busy_writer_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    (void)cfiber_ev_sleep((uint64_t)ms_to_ns(10));
+    (void)write(fd, "x", 1);
+    close(fd);
+}
+
+static int test_second_waiter_is_busy(void) {
+    g_busy_st = CFIBER_EV_READY;
+    g_busy_errno = 0;
+    g_busy_first_n = -2;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, busy_first_fiber, (void*)(intptr_t)fds[0], nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, busy_second_fiber, (void*)(intptr_t)fds[0], nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, busy_writer_fiber, (void*)(intptr_t)fds[1], nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_busy_st, CFIBER_EV_ERROR);
+    ASSERT_EQ_U32(g_busy_errno, EBUSY);
+    ASSERT_EQ_U32(g_busy_first_n, 1); /* the parked fiber kept its wait */
+
+    close(fds[0]);
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
  * create / run / destroy churn (leak balance under ASan)
  * ============================================================================ */
 
@@ -492,6 +753,7 @@ static int test_create_destroy_churn(void) {
 
 int main(void) {
     cfiber_test_suite_begin("epoll reactor");
+    signal(SIGPIPE, SIG_IGN); /* a write to a closed peer must fail, not kill the run */
 
     RUN_TEST(test_spawn_yield_completion);
     RUN_TEST(test_fd_park_wake);
@@ -503,6 +765,11 @@ int main(void) {
     RUN_TEST(test_inproc_wake_cancel);
     RUN_TEST(test_ring_stress);
     RUN_TEST(test_concurrency_stress);
+    RUN_TEST(test_fd_handoff);
+    RUN_TEST(test_fd_close_and_reuse);
+    RUN_TEST(test_peer_close_reads_zero);
+    RUN_TEST(test_close_parked_fd);
+    RUN_TEST(test_second_waiter_is_busy);
     RUN_TEST(test_create_destroy_churn);
 
     return cfiber_test_report();
