@@ -142,9 +142,20 @@ as an unwind.
 `cfiber_reactor_handle_t` is a generation-tagged reference into an
 address-stable fiber pool (cfiber's `multislab`). Waking or cancelling a fiber
 that has already completed compares generations, finds them different, and does
-nothing. A handle is therefore safe to hold indefinitely, which is what makes
-cross-thread control possible at all without a lock around the fiber's
-lifetime.
+nothing. A handle is therefore safe to hold for the reactor's lifetime, which is
+what makes cross-thread control possible at all without a lock around the
+fiber's lifetime. The handle does not extend that lifetime: destroy the reactor
+only after every thread that might still wake or cancel through it has stopped.
+
+## Lifecycle
+
+`cfiber_reactor_run()` returns 0 once every fiber has completed and can be
+called again, for example to run fibers spawned after the first run. It returns
+-1 with `errno` if the poller fails or a reactor is already running on the
+thread; the fibers it did not finish stay live. `cfiber_reactor_destroy()`
+tears those down without resuming them: stacks and fiber records are released,
+but a descriptor or heap block the fiber itself owned is not, so prefer
+cancelling and letting the run complete when that matters.
 
 ## Descriptor ownership
 
