@@ -11,6 +11,12 @@
  * Whichever fires first, or a cancellation, resumes it; the resume path
  * detaches it from the other wait source so it is enqueued exactly once.
  *
+ * Registrations outlive the wait: after a ready wake the one-shot is disarmed
+ * but the entry stays, so the next wait on the same fd is a MOD, not a DEL +
+ * ADD. fd_owner maps each registered fd to the fiber holding it, so a handoff
+ * to another fiber takes the entry over, a finished fiber drops its entry, and
+ * cfiber_ev_close can find the waiter to cancel.
+ *
  * Threading: the loop, ready queue, epoll set, timer heap and fiber pool are
  * touched only by the loop thread. Cross-thread wake/cancel post a command to a
  * mutex-guarded queue and poke an eventfd; the loop drains and applies them. The
@@ -80,7 +86,8 @@ struct cfiber_reactor_fiber {
                           * cannot wrap within the reactor's lifetime, even under
                           * sustained high-churn reuse of a single block. */
 
-    int reg_fd;     /* fd registered in epoll, or -1              */
+    int reg_fd;     /* fd whose epoll registration this fiber holds, or -1 */
+    int wait_fd;    /* fd currently parked on, or -1; a subset of reg_fd   */
     size_t timer_i; /* index into the timer heap, or NO_TIMER     */
     uint64_t deadline_ns;
 
@@ -139,6 +146,11 @@ struct cfiber_reactor {
     ev_fiber_t** heap;
     size_t heap_len;
     size_t heap_cap;
+
+    /* fd -> fiber holding its epoll registration; indexed by fd, grown on
+     * demand. Detach and close act only on the current holder. */
+    ev_fiber_t** fd_owner;
+    size_t fd_owner_cap;
 
     /* Lock-free cross-thread command ring. A wake/cancel issued from the loop
      * thread itself (detected via the thread-local g_reactor) is applied
@@ -315,11 +327,91 @@ static void leave_to_loop(cfiber_reactor_t* s, ev_fiber_t* from, bool finishing)
  * Park / resume
  * ============================================================================ */
 
-static void detach_fd(cfiber_reactor_t* s, ev_fiber_t* f) {
-    if (f->reg_fd != -1) {
-        epoll_ctl(s->epfd, EPOLL_CTL_DEL, f->reg_fd, nullptr);
-        f->reg_fd = -1;
+#define FD_OWNER_INIT_CAP ((size_t)64)
+
+static bool fd_owner_reserve(cfiber_reactor_t* s, int fd) {
+    const size_t need = (size_t)fd + 1;
+    if (need <= s->fd_owner_cap) {
+        return true;
     }
+    size_t cap = s->fd_owner_cap ? s->fd_owner_cap : FD_OWNER_INIT_CAP;
+    while (cap < need) {
+        cap *= 2;
+    }
+    ev_fiber_t** m = (ev_fiber_t**)realloc((void*)s->fd_owner, cap * sizeof(*m));
+    if (!m) {
+        return false;
+    }
+    memset((void*)(m + s->fd_owner_cap), 0, (cap - s->fd_owner_cap) * sizeof(*m));
+    s->fd_owner = m;
+    s->fd_owner_cap = cap;
+    return true;
+}
+
+static ev_fiber_t* fd_owner_get(const cfiber_reactor_t* s, int fd) {
+    return (fd >= 0 && (size_t)fd < s->fd_owner_cap) ? s->fd_owner[fd] : nullptr;
+}
+
+/* Drops f's registration if f still holds it; a taken-over entry is left to
+ * its new holder. */
+static void detach_fd(cfiber_reactor_t* s, ev_fiber_t* f) {
+    const int fd = f->reg_fd;
+    if (fd == -1) {
+        return;
+    }
+    f->reg_fd = -1;
+    if (fd_owner_get(s, fd) == f) {
+        s->fd_owner[fd] = nullptr;
+        epoll_ctl(s->epfd, EPOLL_CTL_DEL, fd, nullptr);
+    }
+}
+
+/* Registers f as the holder of fd, taking over an entry another fiber left
+ * behind. The kernel's view can differ from the map: it drops an entry on the
+ * last close (the number comes back with ENOENT on MOD), so each op falls back
+ * to the other once. */
+static int arm_fd(cfiber_reactor_t* s, ev_fiber_t* f, int fd, uint32_t events) {
+    if (fd < 0) {
+        errno = EBADF;
+        return -1;
+    }
+    if (!fd_owner_reserve(s, fd)) {
+        errno = ENOMEM;
+        return -1;
+    }
+    if (f->reg_fd != fd) {
+        detach_fd(s, f); /* moved to a different fd */
+    }
+
+    ev_fiber_t* const holder = s->fd_owner[fd];
+    if (holder && holder != f) {
+        if (holder->state == FB_PARKED && holder->wait_fd == fd) {
+            errno = EBUSY; /* one fiber waits on a descriptor at a time */
+            return -1;
+        }
+        holder->reg_fd = -1;
+    }
+
+    struct epoll_event e = {.events = events | (uint32_t)EPOLLONESHOT};
+    e.data.ptr = f;
+    int op = holder ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+    if (epoll_ctl(s->epfd, op, fd, &e) < 0) {
+        if (errno == ENOENT) {
+            op = EPOLL_CTL_ADD;
+        } else if (errno == EEXIST) {
+            op = EPOLL_CTL_MOD;
+        } else {
+            op = -1;
+        }
+        if (op < 0 || epoll_ctl(s->epfd, op, fd, &e) < 0) {
+            s->fd_owner[fd] = nullptr; /* state unknown; start over next time */
+            f->reg_fd = -1;
+            return -1;
+        }
+    }
+    s->fd_owner[fd] = f;
+    f->reg_fd = fd;
+    return 0;
 }
 
 /* Move a parked fiber back onto the ready queue with the given status. Idempotent
@@ -332,6 +424,13 @@ static void resume(cfiber_reactor_t* s, ev_fiber_t* f, cfiber_ev_status_t status
     f->wait_status = status;
     s->blocked--;
     enqueue(s, f);
+}
+
+/* Detach a parked fiber from both wait sources and resume it. */
+static void unpark(cfiber_reactor_t* s, ev_fiber_t* f, cfiber_ev_status_t status) {
+    detach_fd(s, f);
+    timer_remove(s, f);
+    resume(s, f, status);
 }
 
 /* Park the current fiber and switch to the loop. Returns the delivered status. */
@@ -354,20 +453,9 @@ cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns
     ASSERT(s && s->current && "cfiber_ev_wait outside a reactor fiber");
     ev_fiber_t* f = s->current;
 
-    struct epoll_event e = {.events = direction | (uint32_t)EPOLLONESHOT};
-    e.data.ptr = f;
-
-    int op;
-    if (f->reg_fd == fd) {
-        op = EPOLL_CTL_MOD; /* re-arm the one-shot interest */
-    } else {
-        detach_fd(s, f); /* fiber moved to a different fd */
-        op = EPOLL_CTL_ADD;
-    }
-    if (epoll_ctl(s->epfd, op, fd, &e) < 0) {
+    if (arm_fd(s, f, fd, direction) < 0) {
         return CFIBER_EV_ERROR;
     }
-    f->reg_fd = fd;
 
     if (timeout_ns >= 0) {
         if (!timer_add(s, f, now_ns() + (uint64_t)timeout_ns)) {
@@ -377,10 +465,11 @@ cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns
         }
     }
 
+    f->wait_fd = fd;
     cfiber_ev_status_t st = park_current(s);
-    /* On a fd-ready wake the one-shot has disarmed but the registration stays
-     * (re-armed via EPOLL_CTL_MOD next time). On timeout/cancel the loop already
-     * detached the fd. */
+    f->wait_fd = -1;
+    /* Ready: the one-shot is disarmed, the registration stays for the next
+     * wait. Timeout/cancel: the loop already detached the fd. */
     return st;
 }
 
@@ -548,6 +637,21 @@ int cfiber_ev_set_nonblocking(int fd) {
     return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 }
 
+int cfiber_ev_close(int fd) {
+    cfiber_reactor_t* s = g_reactor;
+    ASSERT(s && "cfiber_ev_close outside a reactor");
+
+    ev_fiber_t* holder = fd_owner_get(s, fd);
+    if (holder) {
+        if (holder->state == FB_PARKED && holder->wait_fd == fd) {
+            unpark(s, holder, CFIBER_EV_CANCELLED);
+        } else {
+            detach_fd(s, holder);
+        }
+    }
+    return close(fd);
+}
+
 /* ============================================================================
  * Fiber-struct pool (multislab-backed)
  *
@@ -579,6 +683,7 @@ static void fiber_repool(cfiber_reactor_t* s, ev_fiber_t* f) {
 }
 
 static void fiber_recycle(cfiber_reactor_t* s, ev_fiber_t* f) {
+    detach_fd(s, f); /* a registration left by the last wait */
     growable_stack_release(s->stacks, &f->stack);
     fiber_repool(s, f);
 }
@@ -664,9 +769,7 @@ static void apply_cmd(cfiber_reactor_t* s, cmd_t c) {
     if (f->generation != c.gen || f->state != FB_PARKED) {
         return; /* fiber completed / was recycled / not parked: no-op */
     }
-    detach_fd(s, f);
-    timer_remove(s, f);
-    resume(s, f, c.kind == CMD_WAKE ? CFIBER_EV_READY : CFIBER_EV_CANCELLED);
+    unpark(s, f, c.kind == CMD_WAKE ? CFIBER_EV_READY : CFIBER_EV_CANCELLED);
 }
 
 /* Post a command from another thread: enqueue, then poke the eventfd to break
@@ -712,6 +815,7 @@ static bool spawn_locked(cfiber_reactor_t* s, cfiber_reactor_fn fn, void* arg, c
     f->fiber.stack = (uint8_t*)f->stack.mem_base;
     f->fiber.stack_size = f->stack.total_size;
     f->reg_fd = -1;
+    f->wait_fd = -1;
     f->timer_i = NO_TIMER;
     memset(&f->fiber.ctx, 0, sizeof(context_t));
 
@@ -976,6 +1080,7 @@ void cfiber_reactor_destroy(cfiber_reactor_t* r) {
     multislab_destroy(&s->fibers); /* frees every fiber block */
     ring_destroy(&s->cmds);
     free((void*)s->heap);
+    free((void*)s->fd_owner);
 
     if (s->stacks) {
         growable_stack_allocator_destroy(s->stacks);
