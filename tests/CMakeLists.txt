@@ -47,6 +47,15 @@ if(_cfiber_register_ctest)
 endif()
 
 # ======================================================================================
+# Cortex-M support code (utils/cortex): RAM layout and _sbrk from a fiber stack
+# ======================================================================================
+if(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
+    add_arm_executable(test_cortex_syscalls cortex/test_syscalls.c)
+    target_include_directories(test_cortex_syscalls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(test_cortex_syscalls PRIVATE cfiber cfiber_test project_flags)
+endif()
+
+# ======================================================================================
 # Memory allocator tests (hosted: rely on the default malloc-backed allocator)
 # ======================================================================================
 if(NOT CFIBER_FREESTANDING)

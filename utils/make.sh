@@ -385,6 +385,12 @@ if [[ "${build_tests:-OFF}" == ON ]]; then
     run_executable "tests/unit_tests_${target_arch}"
     ok "tests finished"
 
+    if [[ "${target_arch}" == "arm" ]]; then
+        section "running Cortex-M syscall tests"
+        run_executable "tests/test_cortex_syscalls"
+        ok "Cortex-M syscall tests finished"
+    fi
+
     # Allocator tests use the default malloc-backed allocator, so they only run
     # on hosted targets (arm is bare metal / freestanding).
     if [[ "${target_arch}" != "arm" ]]; then

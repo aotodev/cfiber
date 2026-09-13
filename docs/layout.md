@@ -21,6 +21,7 @@ tests/
   scheduler/   scheduler tests
   stack/       fixed-size + growable stack tests, canary/watermark sanitizer
   defensive/   misuse / error-path tests (built with NDEBUG)
+  cortex/      Cortex-M support code tests (RAM layout, _sbrk)
   test/        the minimal test framework (test.h + test.c)
 fuzz/          libFuzzer harnesses for the allocators, scheduler and reactor
 utils/

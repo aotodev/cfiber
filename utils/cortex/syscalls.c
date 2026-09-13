@@ -14,38 +14,23 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-/* Function to get the current stack pointer */
-static inline char* get_stack_pointer(void) {
-    char* sp;
-    __asm__ volatile("mov %0, sp"
-                     : "=r"(sp));
-    return sp;
-}
-
-/** End of BSS, start of heap. */
-extern char _ebss;
-
-/** Tracks the current end of the heap. */
-static char* current_break = nullptr;
+/* Heap bounds from the linker script; the main stack sits above _heap_end.
+ * SP is no guide here: fiber stacks are carved from the heap, so inside a
+ * fiber SP is below the break. */
+extern char _heap_start;
+extern char _heap_end;
 
 void* _sbrk(ptrdiff_t increment) {
-    char* current_stack_ptr = get_stack_pointer();
+    static char* brk = &_heap_start;
 
-    if (!current_break) {
-        current_break = &_ebss;
-    }
-
-    char* previous_break = current_break;
-
-    /* Is the new top of the heap going to cross the current bottom of the stack? */
-    if ((current_break + increment) > current_stack_ptr) {
-        /* Maybe: Trigger a hard fault; this is a fatal error. */
+    if (increment > &_heap_end - brk || increment < &_heap_start - brk) {
         errno = ENOMEM;
         return (void*)-1;
     }
 
-    current_break += increment;
-    return (void*)previous_break;
+    char* const previous = brk;
+    brk += increment;
+    return previous;
 }
 
 void _exit(int status) {

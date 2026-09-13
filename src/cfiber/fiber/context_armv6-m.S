@@ -2,6 +2,7 @@
 .thumb
 .text
 
+.thumb_func
 .global switch_context
 .type switch_context, %function
 

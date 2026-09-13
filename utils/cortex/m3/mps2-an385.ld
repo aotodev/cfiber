@@ -1,19 +1,18 @@
-/*==============================================================================
- * Linker script for the Arm MPS2+ AN385 platform (Cortex-M3)
- * Leverages ITCM for code and DTCM for data.
- *==============================================================================*/
+/* Arm MPS2+ AN385 (Cortex-M3): code in ITCM, data, heap and stack in DTCM. */
 
 MEMORY
 {
-    ITCM (rx) : ORIGIN = 0x00000000, LENGTH = 1M   /* Instruction TCM for code */
-    DTCM (rwx): ORIGIN = 0x20000000, LENGTH = 1M   /* Data TCM for data/stack/heap */
+    ITCM (rx)  : ORIGIN = 0x00000000, LENGTH = 1M
+    DTCM (rwx) : ORIGIN = 0x20000000, LENGTH = 1M
 }
+
+/* Main stack at the top of DTCM; fiber stacks come from the heap. */
+_main_stack_size = 16K;
 
 ENTRY(_start)
 
 SECTIONS
 {
-    /* The .text section, containing code and read-only data, goes into ITCM */
     .text :
     {
         KEEP(*(.isr_vector))
@@ -21,30 +20,30 @@ SECTIONS
         *(.rodata*)
     } > ITCM
 
-    /* LMA of .data is the end of .text in ITCM */
     _data_load_start = LOADADDR(.data);
 
-    /* The .data section (VMA) goes into the start of DTCM */
-    .data : ALIGN(4)
+    /* 32: startup_qemu_armv7-m.S copies and zeroes in 8-word strides. */
+    .data : ALIGN(32)
     {
         _sdata = .;
         *(.data*)
-        . = ALIGN(4);
+        . = ALIGN(32);
         _edata = .;
-    } > DTCM AT > ITCM /* VMA in DTCM, LMA in ITCM */
+    } > DTCM AT > ITCM
 
-    /* The .bss section follows .data in DTCM */
-    .bss : ALIGN(4)
+    .bss (NOLOAD) : ALIGN(32)
     {
         _sbss = .;
         *(.bss*)
         *(COMMON)
-        . = ALIGN(4);
+        . = ALIGN(32);
         _ebss = .;
     } > DTCM
 
-    _end = .;
-
-    /* Stack grows down from the top of DTCM */
+    _heap_start = _ebss;
     _stack_top = ORIGIN(DTCM) + LENGTH(DTCM);
+    _stack_bottom = _stack_top - _main_stack_size;
+    _heap_end = _stack_bottom;
+
+    ASSERT(_heap_start <= _heap_end, "no RAM left for the heap")
 }
