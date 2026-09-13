@@ -104,6 +104,15 @@ primitive rather than a change to the reactor.
 The in-fiber `cfiber_ev_*` calls operate on the calling thread's running reactor
 implicitly, which is why they take no reactor argument.
 
+## Scheduling
+
+The loop runs the fibers that are ready at the start of a round, then polls.
+The poll has a zero timeout while anything is runnable and blocks only when
+nothing is, so fibers that yield to each other cannot starve I/O, timers or
+cross-thread commands, and `cfiber_ev_yield()` always returns to the loop even
+when the caller is the only fiber. A `while (!flag) cfiber_ev_yield();` loop
+therefore burns a core but does make progress.
+
 ## Timers
 
 Deadlines go into a monotonic min-heap, and the nearest one becomes the
@@ -118,6 +127,12 @@ from another thread. They post to a bounded lock-free ring and poke an `eventfd`
 to break the loop out of `epoll_wait`; issued from the loop thread itself they
 are applied directly instead. From within a fiber, `cfiber_ev_wake()` and
 `cfiber_ev_cancel()` skip the ring entirely.
+
+The ring is drained once per loop round, so commands only take effect while
+`cfiber_reactor_run()` is running. If it fills (1024 outstanding commands, the
+loop not running or stuck in a fiber that never yields), a post returns `false`
+with `errno == EAGAIN` after a short bounded retry rather than blocking the
+caller; nothing is queued and the caller decides whether to retry.
 
 Cancelling a parked fiber resumes it with `CFIBER_EV_CANCELLED`, and an
 in-flight transport helper turns that into `-1` with `errno == ECANCELED`, so

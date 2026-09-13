@@ -120,8 +120,12 @@ CFIBER_EXPORT void cfiber_reactor_run(cfiber_reactor_t* r) __attribute__((nonnul
  * @brief Wakes a fiber parked in cfiber_ev_wait_async().
  * @details Thread-safe. The parked fiber resumes with CFIBER_EV_READY. A no-op
  *          if the handle is stale or the fiber is not parked async.
+ * @return false with errno == EAGAIN if the command could not be queued: the
+ *         bounded command ring is full because the loop is not draining it
+ *         (not running, or inside a fiber that never yields). Nothing is
+ *         posted; retry later. Always true from the loop thread.
  */
-CFIBER_EXPORT void cfiber_reactor_wake(cfiber_reactor_t* r, cfiber_reactor_handle_t h) __attribute__((nonnull(1)));
+CFIBER_EXPORT bool cfiber_reactor_wake(cfiber_reactor_t* r, cfiber_reactor_handle_t h) __attribute__((nonnull(1)));
 
 /**
  * @brief Cancels a parked fiber.
@@ -129,8 +133,9 @@ CFIBER_EXPORT void cfiber_reactor_wake(cfiber_reactor_t* r, cfiber_reactor_handl
  *          CFIBER_EV_CANCELLED (an in-flight transport helper returns -1 with
  *          errno == ECANCELED). A no-op if the handle is stale or the fiber is
  *          not currently parked.
+ * @return As cfiber_reactor_wake().
  */
-CFIBER_EXPORT void cfiber_reactor_cancel(cfiber_reactor_t* r, cfiber_reactor_handle_t h) __attribute__((nonnull(1)));
+CFIBER_EXPORT bool cfiber_reactor_cancel(cfiber_reactor_t* r, cfiber_reactor_handle_t h) __attribute__((nonnull(1)));
 
 /* ============================================================================
  * In-fiber API (implicit current reactor; call only from a fiber)
@@ -154,7 +159,11 @@ CFIBER_EXPORT cfiber_reactor_handle_t cfiber_ev_self(void);
 CFIBER_EXPORT void cfiber_ev_wake(cfiber_reactor_handle_t h);
 CFIBER_EXPORT void cfiber_ev_cancel(cfiber_reactor_handle_t h);
 
-/** @brief Cooperatively yields to other ready fibers. */
+/**
+ * @brief Cooperatively yields: the fiber goes to the back of the ready queue.
+ * @details Always returns to the loop, even when no other fiber is ready, so
+ *          I/O, timers and cross-thread commands progress inside a yield loop.
+ */
 CFIBER_EXPORT void cfiber_ev_yield(void);
 
 /**
