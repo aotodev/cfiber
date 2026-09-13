@@ -63,9 +63,10 @@
 #define TIMER_HEAP_GROWTH 2
 
 /* Cross-thread command ring: a fixed-capacity lock-free MPMC queue (Vyukov).
- * Must be a power of two. Sized generously; commands are drained every loop
- * turn, so it is effectively never full. */
+ * Must be a power of two. Drained once per loop round; a producer that finds
+ * it full retries a few times, then fails with EAGAIN. */
 #define CMD_RING_CAP ((size_t)1024)
+#define POST_RETRIES 16
 
 typedef enum {
     FB_FREE = 0, /* pooled, not in use                       */
@@ -499,14 +500,14 @@ cfiber_ev_status_t cfiber_ev_wait_async(int64_t timeout_ns) {
     return park_current(s);
 }
 
+/* Always returns to the loop, even with nothing else ready: the loop polls
+ * between rounds, so timers, I/O and cross-thread commands progress inside a
+ * yield loop. */
 void cfiber_ev_yield(void) {
     cfiber_reactor_t* s = g_reactor;
     ASSERT(s && s->current && "cfiber_ev_yield outside a reactor fiber");
     ev_fiber_t* cur = s->current;
 
-    if (!s->ready_head) {
-        return; /* nobody else to run */
-    }
     s->current = nullptr;
     enqueue(s, cur);
     leave_to_loop(s, cur, false);
@@ -773,16 +774,21 @@ static void apply_cmd(cfiber_reactor_t* s, cmd_t c) {
 }
 
 /* Post a command from another thread: enqueue, then poke the eventfd to break
- * the loop out of epoll_wait. The loop thread never calls this (it applies
- * directly, see cfiber_reactor_wake/cancel), so spinning on a momentarily full
- * ring cannot deadlock: the sole consumer is a different, draining thread. */
-static void post_cmd(cfiber_reactor_t* s, cmd_t cmd) {
-    while (!ring_enqueue(&s->cmds, cmd)) {
+ * the loop out of epoll_wait. A full ring means the loop is not draining (not
+ * running, or inside a fiber that does not yield); bounded retries cover a
+ * momentary burst, then the command is refused with EAGAIN. */
+static bool post_cmd(cfiber_reactor_t* s, cmd_t cmd) {
+    for (int i = 0; i < POST_RETRIES; i++) {
+        if (ring_enqueue(&s->cmds, cmd)) {
+            uint64_t one = 1;
+            ssize_t rc = write(s->evfd, &one, sizeof one);
+            (void)rc; /* only fails if the 64-bit counter saturates; the loop drains it */
+            return true;
+        }
         sched_yield();
     }
-    uint64_t one = 1;
-    ssize_t rc = write(s->evfd, &one, sizeof one);
-    (void)rc; /* only fails if the 64-bit counter saturates; the loop drains it */
+    errno = EAGAIN;
+    return false;
 }
 
 static void drain_cmds(cfiber_reactor_t* s) {
@@ -856,22 +862,22 @@ static bool on_loop_thread(const cfiber_reactor_t* s) {
     return g_reactor == s;
 }
 
-void cfiber_reactor_wake(cfiber_reactor_t* r, cfiber_reactor_handle_t h) {
+bool cfiber_reactor_wake(cfiber_reactor_t* r, cfiber_reactor_handle_t h) {
     cmd_t c = {.kind = CMD_WAKE, .target = h.f, .gen = h.gen};
     if (on_loop_thread(r)) {
         apply_cmd(r, c); /* no ring / eventfd needed on our own thread */
-    } else {
-        post_cmd(r, c);
+        return true;
     }
+    return post_cmd(r, c);
 }
 
-void cfiber_reactor_cancel(cfiber_reactor_t* r, cfiber_reactor_handle_t h) {
+bool cfiber_reactor_cancel(cfiber_reactor_t* r, cfiber_reactor_handle_t h) {
     cmd_t c = {.kind = CMD_CANCEL, .target = h.f, .gen = h.gen};
     if (on_loop_thread(r)) {
         apply_cmd(r, c);
-    } else {
-        post_cmd(r, c);
+        return true;
     }
+    return post_cmd(r, c);
 }
 
 /* Same-thread fast paths, for use from within a fiber: apply directly, skipping
@@ -924,22 +930,32 @@ void cfiber_reactor_run(cfiber_reactor_t* r) {
     struct epoll_event evs[64];
 
     while (s->active > 0) {
-        if (s->zombie) {
-            fiber_recycle(s, s->zombie);
-            s->zombie = nullptr;
-        }
-
-        ev_fiber_t* f = dequeue(s);
-        if (f) {
+        /* One round: the fibers ready now. Those enqueued meanwhile (yields,
+         * spawns) wait for the next round, so the poll below runs between any
+         * two rounds and ready work cannot starve I/O, timers or commands. */
+        ev_fiber_t* const round_end = s->ready_tail;
+        while (s->ready_head) {
+            ev_fiber_t* f = dequeue(s);
             enter_fiber(s, f);
-            continue;
+            if (s->zombie) {
+                fiber_recycle(s, s->zombie);
+                s->zombie = nullptr;
+            }
+            if (f == round_end) {
+                break;
+            }
         }
 
-        if (s->blocked == 0) {
+        if (s->active == 0) {
+            break;
+        }
+        if (!s->ready_head && s->blocked == 0) {
             break; /* no ready fibers, none parked: nothing to wait for */
         }
 
-        int n = epoll_wait(s->epfd, evs, (int)(sizeof evs / sizeof evs[0]), next_timeout_ms(s));
+        /* Zero timeout while there is runnable work; block only when idle. */
+        const int timeout_ms = s->ready_head ? 0 : next_timeout_ms(s);
+        int n = epoll_wait(s->epfd, evs, (int)(sizeof evs / sizeof evs[0]), timeout_ms);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
@@ -963,11 +979,6 @@ void cfiber_reactor_run(cfiber_reactor_t* r) {
         }
 
         fire_expired_timers(s);
-    }
-
-    if (s->zombie) {
-        fiber_recycle(s, s->zombie);
-        s->zombie = nullptr;
     }
 
     cfiber_set_return_hook(prev_hook.fn, prev_hook.ctx);

@@ -40,6 +40,11 @@ static int64_t ms_to_ns(int64_t ms) {
     return ms * 1000000;
 }
 
+static void trivial_fiber(void* arg) {
+    (void)arg;
+    cfiber_ev_yield();
+}
+
 /* ============================================================================
  * spawn / yield / completion ordering
  * ============================================================================ */
@@ -373,6 +378,7 @@ typedef struct {
     cfiber_reactor_handle_t* handles;
     int lo;
     int hi;
+    int failed;
 } waker_arg_t;
 
 static void* waker_thread(void* arg) {
@@ -380,7 +386,9 @@ static void* waker_thread(void* arg) {
     struct timespec ts = {.tv_sec = 0, .tv_nsec = 50L * 1000000}; /* let waiters park */
     nanosleep(&ts, nullptr);
     for (int i = a->lo; i < a->hi; i++) {
-        cfiber_reactor_wake(a->r, a->handles[i]); /* concurrent MPMC producers */
+        if (!cfiber_reactor_wake(a->r, a->handles[i])) { /* concurrent MPMC producers */
+            a->failed++;
+        }
     }
     return nullptr;
 }
@@ -410,6 +418,7 @@ static int test_ring_stress(void) {
 
     for (int t = 0; t < RING_THREADS; t++) {
         pthread_join(th[t], nullptr);
+        ASSERT_EQ_U32(wa[t].failed, 0);
     }
     for (int i = 0; i < RING_WAITERS; i++) {
         ASSERT_EQ_U32(g_ring_st[i], CFIBER_EV_READY);
@@ -466,6 +475,121 @@ static int test_concurrency_stress(void) {
     cfiber_reactor_run(r);
 
     ASSERT_EQ_U32(g_echo_ok, STRESS_PAIRS);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * loop fairness: yield loops must not starve timers, I/O or commands
+ * ============================================================================ */
+
+/* A spins on cfiber_ev_yield until B, asleep on a timer, sets the flag. */
+static volatile int g_spin_flag;
+static int g_spin_iters;
+
+static void yield_spinner_fiber(void* arg) {
+    (void)arg;
+    while (!g_spin_flag) {
+        cfiber_ev_yield();
+        g_spin_iters++;
+    }
+}
+
+static void flag_after_sleep_fiber(void* arg) {
+    (void)arg;
+    (void)cfiber_ev_sleep((uint64_t)ms_to_ns(10));
+    g_spin_flag = 1;
+}
+
+static int test_yield_spin_lets_timer_fire(void) {
+    g_spin_flag = 0;
+    g_spin_iters = 0;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, yield_spinner_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, flag_after_sleep_fiber, nullptr, nullptr));
+
+    cfiber_reactor_run(r); /* hangs forever if the timer never fires */
+
+    ASSERT_EQ_U32(g_spin_flag, 1);
+    ASSERT_TRUE(g_spin_iters > 0); /* the spinner really yielded */
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* Two fibers ping-pong while a third is parked on a descriptor whose peer
+ * writes from a sleeping fiber: the read must complete. */
+static volatile int g_pp_done;
+static ssize_t g_pp_read_n;
+
+static void pingpong_fiber(void* arg) {
+    (void)arg;
+    while (!g_pp_done) {
+        cfiber_ev_yield();
+    }
+}
+
+static void pp_reader_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    char buf[8];
+    g_pp_read_n = cfiber_ev_read(fd, buf, sizeof buf);
+    g_pp_done = 1;
+    close(fd);
+}
+
+static void pp_writer_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    (void)cfiber_ev_sleep((uint64_t)ms_to_ns(10));
+    (void)write(fd, "x", 1);
+    close(fd);
+}
+
+static int test_pingpong_does_not_starve_io(void) {
+    g_pp_done = 0;
+    g_pp_read_n = -2;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, pingpong_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, pingpong_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, pp_reader_fiber, (void*)(intptr_t)fds[0], nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, pp_writer_fiber, (void*)(intptr_t)fds[1], nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_pp_read_n, 1);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* Nobody drains the ring while the loop is not running: posting must stop
+ * with EAGAIN instead of spinning, and work again once the loop has drained. */
+static int test_post_backpressure(void) {
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+
+    cfiber_reactor_handle_t h;
+    ASSERT_TRUE(cfiber_reactor_spawn(r, trivial_fiber, nullptr, &h));
+
+    int posted = 0;
+    errno = 0;
+    while (cfiber_reactor_wake(r, h)) {
+        posted++;
+        ASSERT_TRUE(posted < (1 << 16)); /* a full ring must be reported */
+    }
+    ASSERT_EQ_U32(errno, EAGAIN);
+    ASSERT_TRUE(posted > 0);
+
+    cfiber_reactor_run(r); /* drains the ring; the wakes are no-ops on a ready fiber */
+
+    ASSERT_TRUE(cfiber_reactor_wake(r, h)); /* stale handle, but the post itself succeeds */
 
     cfiber_reactor_destroy(r);
     return 0;
@@ -734,10 +858,6 @@ static int test_second_waiter_is_busy(void) {
  * create / run / destroy churn (leak balance under ASan)
  * ============================================================================ */
 
-static void trivial_fiber(void* arg) {
-    (void)arg;
-    cfiber_ev_yield();
-}
 
 static int test_create_destroy_churn(void) {
     for (int i = 0; i < 32; i++) {
@@ -765,6 +885,9 @@ int main(void) {
     RUN_TEST(test_inproc_wake_cancel);
     RUN_TEST(test_ring_stress);
     RUN_TEST(test_concurrency_stress);
+    RUN_TEST(test_yield_spin_lets_timer_fire);
+    RUN_TEST(test_pingpong_does_not_starve_io);
+    RUN_TEST(test_post_backpressure);
     RUN_TEST(test_fd_handoff);
     RUN_TEST(test_fd_close_and_reuse);
     RUN_TEST(test_peer_close_reads_zero);
