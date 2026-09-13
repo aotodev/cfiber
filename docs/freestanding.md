@@ -100,6 +100,14 @@ get a canary word checked on release and a watermark that reports actual peak
 usage, then size from the measurement rather than from a guess. See
 [sanitizers.md](sanitizers.md).
 
+## Memory layout (QEMU targets)
+
+The linker scripts in `utils/cortex/` lay RAM out as `.data`, `.bss`, the heap
+and a fixed main stack at the top, sized by `_main_stack_size`. `_sbrk` bounds
+the heap by `_heap_end`, never by the stack pointer: fiber stacks are carved
+from the heap, so inside a fiber SP is below the break. Exhaustion is `ENOMEM`,
+not a collision with the main stack.
+
 ## Test targets
 
 The bare-metal path is exercised in CI on Cortex-M0/M0+, M3, M4 and M7 under

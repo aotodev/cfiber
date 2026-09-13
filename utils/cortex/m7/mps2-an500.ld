@@ -1,81 +1,49 @@
-/*==============================================================================
- * Linker script for QEMU MPS2-AN500 (Cortex-M7, 4 MiB FLASH, 4 MiB SRAM)
- *==============================================================================*/
+/* QEMU MPS2-AN500 (Cortex-M7): 4M flash at 0, 4M SRAM at 0x20000000. */
+
+MEMORY
+{
+    FLASH (rx) : ORIGIN = 0x00000000, LENGTH = 4M
+    RAM (rwx)  : ORIGIN = 0x20000000, LENGTH = 4M
+}
+
+/* Main stack at the top of RAM; fiber stacks come from the heap. */
+_main_stack_size = 16K;
 
 ENTRY(_start)
 
-/*----------------------------------------------------------------------------*/
-/* Memory regions                                                             */
-/*----------------------------------------------------------------------------*/
-MEMORY
-{
-    /* QEMU maps FLASH at 0x00000000 and SRAM at 0x20000000 */
-    FLASH (rx)  : ORIGIN = 0x00000000, LENGTH = 4M
-    RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 4M
-}
-
-/*----------------------------------------------------------------------------*/
-/* Section placement                                                          */
-/*----------------------------------------------------------------------------*/
 SECTIONS
 {
-    /*----------------------------------------------------------*
-     * Vector table and code execute from FLASH
-     *----------------------------------------------------------*/
     .text :
     {
-      __text_start__ = .;
-      KEEP(*(.isr_vector))
-      *(.text*)
-      *(.rodata*)
-      KEEP(*(.init))
-      KEEP(*(.fini))
-      /* Exception unwinding tables */
-      *(.ARM.extab* .gnu.linkonce.armextab.*)
-      *(.ARM.exidx* .gnu.linkonce.armexidx.*)
-      __text_end__ = .;
+        KEEP(*(.isr_vector))
+        *(.text*)
+        *(.rodata*)
     } > FLASH
-    /*----------------------------------------------------------*
-     * Initialized data: load in FLASH, run in RAM
-     *----------------------------------------------------------*/
-    .data : AT(__text_end__)
-    {
-        __data_load_start = LOADADDR(.data);
-        __data_start__ = .;
-        *(.data*)
-        *(.ramfunc*)                /* Optional: functions copied to RAM */
-        __data_end__ = .;
-    } > RAM
 
-    /*----------------------------------------------------------*
-     * Uninitialized data (zero-fill in RAM)
-     *----------------------------------------------------------*/
-    .bss (NOLOAD) :
+    _data_load_start = LOADADDR(.data);
+
+    /* 32: startup_qemu_armv7-m.S copies and zeroes in 8-word strides. */
+    .data : ALIGN(32)
     {
-        __bss_start__ = .;
+        _sdata = .;
+        *(.data*)
+        . = ALIGN(32);
+        _edata = .;
+    } > RAM AT > FLASH
+
+    .bss (NOLOAD) : ALIGN(32)
+    {
+        _sbss = .;
         *(.bss*)
         *(COMMON)
-        __bss_end__ = .;
+        . = ALIGN(32);
+        _ebss = .;
     } > RAM
 
-    /*----------------------------------------------------------*
-     * Heap + stack region (top of RAM downward)
-     *----------------------------------------------------------*/
-    .stack (NOLOAD) :
-    {
-        . = ALIGN(8);
-        __stack_bottom__ = .;
-        . += 0x00001000;            /* 4 KiB stack, adjust as desired */
-        __stack_top__ = .;
-    } > RAM
+    _heap_start = _ebss;
+    _stack_top = ORIGIN(RAM) + LENGTH(RAM);
+    _stack_bottom = _stack_top - _main_stack_size;
+    _heap_end = _stack_bottom;
 
-    /* Symbols matching your startup expectations */
-    _sdata           = __data_start__;
-    _edata           = __data_end__;
-    _data_load_start = __data_load_start;
-    _sbss            = __bss_start__;
-    _ebss            = __bss_end__;
-    _stack_top       = __stack_top__;
+    ASSERT(_heap_start <= _heap_end, "no RAM left for the heap")
 }
-
-/* End of file */
