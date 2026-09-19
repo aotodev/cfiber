@@ -173,10 +173,17 @@ static int test_multislab_init_validation(void) {
 
     /* block_size below a cache line is rejected */
     ASSERT_TRUE(multislab_init(&ms, CACHE_LINE_SIZE - 1, 4, 0, 0) != 0);
+    /* not a multiple of the cache line: slab_init would refuse every slab */
+    ASSERT_TRUE(multislab_init(&ms, BLOCK + 1, 4, 0, 0) != 0);
     /* zero blocks per slab is rejected */
     ASSERT_TRUE(multislab_init(&ms, BLOCK, 0, 0, 0) != 0);
     /* more blocks than the bitmap can track is rejected */
     ASSERT_TRUE(multislab_init(&ms, BLOCK, MAX_BLOCK_COUNT + 1, 0, 0) != 0);
+    /* block_size * blocks_per_slab must not wrap */
+    ASSERT_TRUE(multislab_init(&ms, (SIZE_MAX / 2 + 1), 4, 0, 0) != 0);
+    /* a backing allocator needs both callbacks */
+    ASSERT_TRUE(multislab_init_ext(&ms, BLOCK, 4, 0, 0, nullptr, counting_free, nullptr) != 0);
+    ASSERT_TRUE(multislab_init_ext(&ms, BLOCK, 4, 0, 0, counting_alloc, nullptr, nullptr) != 0);
     /* a sane configuration succeeds */
     ASSERT_EQ_U32(multislab_init(&ms, BLOCK, 4, 0, 0), 0);
 

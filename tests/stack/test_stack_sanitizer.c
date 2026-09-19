@@ -26,6 +26,7 @@
 static cstack_t make_stack(uint8_t* buf, size_t size) {
     return (cstack_t){
         .mem_base = buf,
+        .usable_base = buf,
         .stack_top = buf + size,
         .total_size = size,
     };

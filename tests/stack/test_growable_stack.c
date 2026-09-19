@@ -26,6 +26,7 @@
 #include "cfiber/stack/stack.h"
 #include "test/test.h"
 
+#include <errno.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdint.h>
@@ -49,11 +50,35 @@ static int test_growable_create_layout(void) {
     /* total VMA = requested size + one bottom guard page */
     ASSERT_EQ_U64(s.total_size, max + page_size());
     ASSERT_EQ_PTR(s.stack_top, (char*)s.mem_base + s.total_size);
+    /* the usable stack starts above the guard page and is exactly max */
+    ASSERT_EQ_PTR(s.usable_base, (char*)s.mem_base + page_size());
+    ASSERT_EQ_U64(cstack_usable_size(&s), max);
 
     cstack_growable_destroy(&s);
     ASSERT_NULL(s.mem_base);
+    ASSERT_NULL(s.usable_base);
     ASSERT_NULL(s.stack_top);
     ASSERT_EQ_U64(s.total_size, 0);
+    return 0;
+}
+
+static int test_growable_create_rejects_bad_sizes(void) {
+    const size_t ps = page_size();
+
+    errno = 0;
+    cstack_t zero = cstack_growable_create(0);
+    ASSERT_FALSE(is_valid_cstack(&zero));
+    ASSERT_EQ_U32(errno, EINVAL);
+
+    errno = 0;
+    cstack_t odd = cstack_growable_create(ps + 1);
+    ASSERT_FALSE(is_valid_cstack(&odd));
+    ASSERT_EQ_U32(errno, EINVAL);
+
+    errno = 0;
+    cstack_t huge = cstack_growable_create(SIZE_MAX - ps + 1); /* + guard page would wrap */
+    ASSERT_FALSE(is_valid_cstack(&huge));
+    ASSERT_EQ_U32(errno, EINVAL);
     return 0;
 }
 
@@ -186,6 +211,29 @@ static int test_pool_alloc_release_destroy(void) {
     return 0;
 }
 
+/* Releasing into a full cache unmaps the stack instead of pooling it. */
+static int test_pool_full_cache_destroys(void) {
+    const growable_stack_allocator_args_t args = {
+        .max_stack_size = page_size() * 4,
+        .cache_capacity = 1,
+        .initial_cached = 0,
+    };
+    growable_stack_allocator_t* alloc = growable_stack_allocator_create(args);
+    ASSERT_NOT_NULL(alloc);
+
+    cstack_t a = growable_stack_alloc(alloc);
+    cstack_t b = growable_stack_alloc(alloc);
+    ASSERT_TRUE(is_valid_cstack(&a));
+    ASSERT_TRUE(is_valid_cstack(&b));
+
+    growable_stack_release(alloc, &a); /* cached */
+    growable_stack_release(alloc, &b); /* cache full: destroyed */
+    ASSERT_NULL(b.mem_base);
+
+    ASSERT_EQ_U32((uint32_t)growable_stack_allocator_destroy(alloc), 0);
+    return 0;
+}
+
 static int test_pool_recycles_cached_stack(void) {
     const growable_stack_allocator_args_t args = {
         .max_stack_size = page_size() * 8,
@@ -213,12 +261,14 @@ int main(void) {
     cfiber_test_suite_begin("growable stacks");
 
     RUN_TEST(test_growable_create_layout);
+    RUN_TEST(test_growable_create_rejects_bad_sizes);
     RUN_TEST(test_growable_usable_region_writable);
     RUN_TEST(test_growable_recycle_keeps_stack_usable);
 #if !defined(__SANITIZE_ADDRESS__)
     RUN_TEST(test_growable_guard_page_faults);
 #endif
     RUN_TEST(test_pool_alloc_release_destroy);
+    RUN_TEST(test_pool_full_cache_destroys);
     RUN_TEST(test_pool_recycles_cached_stack);
 
     return cfiber_test_report();

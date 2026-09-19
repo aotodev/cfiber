@@ -24,6 +24,8 @@ option(CFIBER_REACTOR                   "Build the optional epoll(7) reactor sch
 
 set(CFIBER_ASAN_REDZONE "" CACHE STRING
     "Size in bytes of the poisoned guard below each fiber stack (default: one cache line). Only used when CFIBER_ASAN is ON.")
+set(CFIBER_BITMAP_SIZE 8 CACHE STRING
+    "Bitmap words per slab; caps blocks per slab at BITMAP_WORD_BITS * CFIBER_BITMAP_SIZE. Part of the ABI.")
 option(CFIBER_BUILD_SHARED              "Build cfiber as a shared library (default: static)" OFF)
 option(CFIBER_POSITION_INDEPENDENT_CODE "Build the static library with -fPIC (ignored when shared)" OFF)
 
@@ -108,6 +110,9 @@ target_sources(cfiber PRIVATE
 )
 
 target_include_directories(cfiber PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# PUBLIC: the value sizes slab_t and everything embedding it.
+target_compile_definitions(cfiber PUBLIC "BITMAP_SIZE=${CFIBER_BITMAP_SIZE}U")
 
 target_link_libraries(cfiber PRIVATE project_flags)
 

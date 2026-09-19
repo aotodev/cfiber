@@ -167,8 +167,7 @@ bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, fiber_fn func, void* user
         return false;
     }
 
-    /* The usable stack starts above the ASan redzone (zero offset without ASan). */
-    task->fiber.stack = (uint8_t*)task->stack.mem_base + CFIBER_ASAN_REDZONE;
+    task->fiber.stack = task->stack.usable_base;
     task->fiber.stack_size = sched->stack_size;
     memset(&task->fiber.ctx, 0, sizeof(context_t));
     task->next = nullptr;

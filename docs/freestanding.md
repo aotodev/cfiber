@@ -17,7 +17,9 @@ dependency to satisfy beyond that.
 
 ## Running without malloc
 
-`cfiber_scheduler_init_ext()` takes a backing allocator. The scheduler routes
+The default backing allocator is the C library's `aligned_alloc`, which on a
+newlib target means the heap. `cfiber_scheduler_init_ext()` takes a backing
+allocator instead. The scheduler routes
 every multislab request through it, task records and fiber stacks alike, so all
 of the scheduler's memory comes out of a region the user owns.
 

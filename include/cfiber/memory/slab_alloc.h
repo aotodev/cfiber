@@ -17,6 +17,9 @@
 extern "C" {
 #endif
 
+/* Layout-affecting: the CMake option CFIBER_BITMAP_SIZE sets it PUBLIC for the
+ * library and its consumers alike. The default here is for builds outside
+ * CMake and must match the library's. */
 #ifndef BITMAP_SIZE
 #define BITMAP_SIZE 8U
 #endif
@@ -38,9 +41,12 @@ typedef struct slab_struct {
  * @brief Initialize a slab allocator with user-provided memory.
  * @param alloc       The allocator to initialize.
  * @param block_size  Size of each block (must be a multiple of CACHE_LINE_SIZE).
- * @param memory      Pointer to the memory region.
+ * @param memory      Pointer to the memory region, aligned to at least
+ *                    alignof(max_align_t). Blocks inherit this alignment, so
+ *                    a cache-line-aligned region keeps blocks off shared lines.
  * @param memory_size Size of the memory region in bytes.
- * @return 0 on success, -1 on error.
+ * @return 0 on success, -1 on error (bad sizes, misaligned memory, more blocks
+ *         than the bitmap holds).
  */
 CFIBER_EXPORT int slab_init(slab_t* alloc, size_t block_size, void* memory, size_t memory_size)
     __attribute__((nonnull(1, 3)));

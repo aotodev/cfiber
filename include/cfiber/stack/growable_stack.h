@@ -26,8 +26,10 @@ extern "C" {
 
 /**
  * @brief Create a new growable stack.
- * @param max_size Maximum size for the stack (must be page-aligned)
- * @return A cstack_t descriptor, or an invalid stack on failure
+ * @param max_size Usable size of the stack: non-zero and page-aligned.
+ * @return A cstack_t descriptor, or a zeroed one on failure with errno set:
+ *         EINVAL for a bad size, otherwise the mmap/mprotect error. The guard
+ *         page lies below usable_base, inside the allocation.
  */
 [[nodiscard]] CFIBER_EXPORT cstack_t cstack_growable_create(size_t max_size);
 
