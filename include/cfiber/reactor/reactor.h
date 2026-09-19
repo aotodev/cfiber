@@ -41,7 +41,6 @@
 
 #include "cfiber/core/macros.h"
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/socket.h>

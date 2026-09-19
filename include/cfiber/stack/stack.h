@@ -17,7 +17,7 @@ extern "C" {
  * @details [mem_base, stack_top) is the whole allocation; [usable_base,
  *          stack_top) is the fiber's stack. What lies below usable_base is the
  *          allocator's: the PROT_NONE guard page of a growable stack, the ASan
- *          redzone of a fixed-size one. Give init_fiber() and sanitizer bounds
+ *          redzone of a fixed-size one. Give cfiber_init() and sanitizer bounds
  *          the usable range, never mem_base.
  */
 typedef struct {
@@ -29,15 +29,15 @@ typedef struct {
     void* stack_top;
     /** Size of the whole allocation, stack_top - mem_base. */
     size_t total_size;
-} cstack_t;
+} cfiber_stack_t;
 
 /** @brief Basic sanity check for a stack descriptor. */
-static inline int is_valid_cstack(const cstack_t* const stack) {
+static inline int cfiber_stack_is_valid(const cfiber_stack_t* const stack) {
     return stack && stack->mem_base && stack->usable_base && stack->stack_top && stack->total_size;
 }
 
 /** @brief Bytes a fiber may use: stack_top - usable_base. */
-static inline size_t cstack_usable_size(const cstack_t* const stack) {
+static inline size_t cfiber_stack_usable_size(const cfiber_stack_t* const stack) {
     return (size_t)((const char*)stack->stack_top - (const char*)stack->usable_base);
 }
 

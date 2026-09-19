@@ -1,17 +1,16 @@
 #include "cfiber/stack/growable_stack_allocator.h"
 
+#include "cfiber/core/internal.h"
 #include "cfiber/stack/growable_stack.h"
 
 #include <assert.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
-struct growable_stack_allocator {
+struct cfiber_growable_stack_allocator {
     size_t max_stack_size;
     size_t total_size; /* max_stack_size + guard page: what our stacks measure */
-    cstack_t* cache;
+    cfiber_stack_t* cache;
     size_t cache_capacity;
     size_t cache_count;
 
@@ -19,14 +18,14 @@ struct growable_stack_allocator {
     size_t active_count;
 };
 
-static void growable_allocator_cleanup(growable_stack_allocator_t* alloc) {
+static void growable_allocator_cleanup(cfiber_growable_stack_allocator_t* alloc) {
     if (!alloc) {
         return;
     }
 
     if (alloc->cache) {
         for (size_t i = 0; i < alloc->cache_count; i++) {
-            cstack_growable_destroy(&alloc->cache[i]);
+            cfiber_growable_stack_destroy(&alloc->cache[i]);
         }
         free(alloc->cache);
     }
@@ -34,7 +33,7 @@ static void growable_allocator_cleanup(growable_stack_allocator_t* alloc) {
     free(alloc);
 }
 
-growable_stack_allocator_t* growable_stack_allocator_create(growable_stack_allocator_args_t args) {
+cfiber_growable_stack_allocator_t* cfiber_growable_stack_allocator_create(cfiber_growable_stack_allocator_args_t args) {
     const long raw_page_size = sysconf(_SC_PAGESIZE);
     if (UNLIKELY(raw_page_size <= 0)) {
         return nullptr;
@@ -51,7 +50,7 @@ growable_stack_allocator_t* growable_stack_allocator_create(growable_stack_alloc
         return nullptr;
     }
 
-    growable_stack_allocator_t* alloc = calloc(1, sizeof(growable_stack_allocator_t));
+    cfiber_growable_stack_allocator_t* alloc = calloc(1, sizeof(cfiber_growable_stack_allocator_t));
     if (!alloc) {
         return nullptr;
     }
@@ -62,7 +61,7 @@ growable_stack_allocator_t* growable_stack_allocator_create(growable_stack_alloc
     alloc->cache_count = 0;
     alloc->active_count = 0;
 
-    alloc->cache = calloc(alloc->cache_capacity, sizeof(cstack_t));
+    alloc->cache = calloc(alloc->cache_capacity, sizeof(cfiber_stack_t));
     if (!alloc->cache) {
         growable_allocator_cleanup(alloc);
         return nullptr;
@@ -71,7 +70,7 @@ growable_stack_allocator_t* growable_stack_allocator_create(growable_stack_alloc
     /* Pre-allocate initial stacks if requested */
     if (args.initial_cached) {
         for (size_t i = 0; i < args.initial_cached; i++) {
-            alloc->cache[i] = cstack_growable_create(args.max_stack_size);
+            alloc->cache[i] = cfiber_growable_stack_create(args.max_stack_size);
             if (!alloc->cache[i].mem_base) {
                 growable_allocator_cleanup(alloc);
                 return nullptr;
@@ -83,7 +82,7 @@ growable_stack_allocator_t* growable_stack_allocator_create(growable_stack_alloc
     return alloc;
 }
 
-int growable_stack_allocator_destroy(growable_stack_allocator_t* alloc) {
+int cfiber_growable_stack_allocator_destroy(cfiber_growable_stack_allocator_t* alloc) {
     int res = 0;
     if (alloc->active_count) {
         assert(!alloc->active_count && "Memory leak: stacks were allocated but never released");
@@ -93,24 +92,24 @@ int growable_stack_allocator_destroy(growable_stack_allocator_t* alloc) {
     return res;
 }
 
-cstack_t growable_stack_alloc(growable_stack_allocator_t* alloc) {
+cfiber_stack_t cfiber_growable_stack_alloc(cfiber_growable_stack_allocator_t* alloc) {
     if (alloc->cache_count > 0) {
         alloc->active_count++;
         return alloc->cache[--alloc->cache_count];
     }
 
-    cstack_t stack = cstack_growable_create(alloc->max_stack_size);
+    cfiber_stack_t stack = cfiber_growable_stack_create(alloc->max_stack_size);
     if (stack.mem_base) {
         alloc->active_count++; /* only a stack that exists is outstanding */
     }
     return stack;
 }
 
-void growable_stack_release(growable_stack_allocator_t* alloc, cstack_t* stack) {
+void cfiber_growable_stack_release(cfiber_growable_stack_allocator_t* alloc, cfiber_stack_t* stack) {
     if (stack->total_size != alloc->total_size) {
         /* Not ours: pooling it would hand out a stack of the wrong size later. */
         assert(false && "stack released to a pool it was not allocated from");
-        cstack_growable_destroy(stack);
+        cfiber_growable_stack_destroy(stack);
         return;
     }
 
@@ -118,9 +117,9 @@ void growable_stack_release(growable_stack_allocator_t* alloc, cstack_t* stack) 
     alloc->active_count--;
 
     if (alloc->cache_count >= alloc->cache_capacity) {
-        cstack_growable_destroy(stack);
+        cfiber_growable_stack_destroy(stack);
     } else {
-        cstack_growable_recycle(stack);
+        cfiber_growable_stack_recycle(stack);
         alloc->cache[alloc->cache_count++] = *stack;
     }
 

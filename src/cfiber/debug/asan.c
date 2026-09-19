@@ -13,7 +13,7 @@ static thread_local bool tl_host_known = false;
 
 /* Set between a start_switch and its matching finish. Only cfiber_asan_switch
  * issues starts, so this lets the shared assembly prologue tell an annotated
- * (scheduler-driven) fiber entry apart from a raw switch_context() entry, where
+ * (scheduler-driven) fiber entry apart from a raw cfiber_switch_context() entry, where
  * issuing finish_switch_fiber would abort with "finishing a switch that has not
  * started". Cooperative scheduling means at most one start is ever outstanding
  * on a thread, so a single flag suffices. */
@@ -25,8 +25,8 @@ static thread_local bool tl_switch_pending = false;
  * consider current (mid-switch), producing spurious reports. */
 #define CFIBER_NO_ASAN __attribute__((no_sanitize_address, noinline))
 
-CFIBER_NO_ASAN void cfiber_asan_switch(context_t* const from,
-                                       context_t* const to,
+CFIBER_NO_ASAN void cfiber_asan_switch(cfiber_context_t* const from,
+                                       cfiber_context_t* const to,
                                        const void* const to_stack_low,
                                        const size_t to_stack_size,
                                        const bool finishing) {
@@ -38,10 +38,10 @@ CFIBER_NO_ASAN void cfiber_asan_switch(context_t* const from,
     tl_switch_pending = true;
     __sanitizer_start_switch_fiber(finishing ? nullptr : &fake_stack, to_stack_low, to_stack_size);
 
-    switch_context(from, to);
+    cfiber_switch_context(from, to);
 
     /* Reached only when this fiber is resumed (never for a terminating one,
-     * whose switch_context above does not return). The party that switched back
+     * whose cfiber_switch_context above does not return). The party that switched back
      * into us issued the paired start; consume it and tell ASan the swap
      * completed. We are now back on `from`'s stack. */
     if (tl_switch_pending) {
@@ -51,7 +51,7 @@ CFIBER_NO_ASAN void cfiber_asan_switch(context_t* const from,
 }
 
 CFIBER_NO_ASAN void cfiber_asan_on_fiber_entry(void) {
-    /* A fiber entered by a bare switch_context() (e.g. driven directly rather
+    /* A fiber entered by a bare cfiber_switch_context() (e.g. driven directly rather
      * than through the scheduler) had no paired start_switch_fiber; issuing a
      * finish here would abort. Only annotate scheduler-driven entries. */
     if (!tl_switch_pending) {

@@ -1,6 +1,8 @@
 #include "cfiber/fiber/fiber.h"
 
-#include "cfiber/core/macros.h"
+#include "cfiber/core/internal.h"
+
+#include <string.h>
 
 /* ============================================================================
  * Fiber-return hook registration
@@ -28,40 +30,15 @@ cfiber_return_hook_t cfiber_get_return_hook(void) {
     return s_return_hook;
 }
 
-/**
- * @brief Invokes the registered fiber-return hook when a fiber returns.
- * @details Runs on the returning fiber's stack. The hook (registered via
- *          cfiber_set_return_hook()) must not return.
- */
-// NOLINTNEXTLINE(misc-use-internal-linkage): false positive, called from per-arch assembly
-[[noreturn]] void fiber_epilogue(void) {
-    ASSERT(s_return_hook.fn && "fiber returned with no fiber-return hook registered");
-    s_return_hook.fn(s_return_hook.ctx);
-
-    /* Should never reach here; a scheduler bug if we do. */
-    ASSERT(false);
-
-    for (;;) {
-#ifdef __x86_64__
-        __asm__ volatile("hlt");
-#elif defined(__aarch64__) || defined(__arm__)
-        __asm__ volatile("wfi");
-#endif
+/* No hook, or a hook that returned: there is no return address on this stack. */
+[[noreturn]] void cfiber_epilogue(void) {
+    if (LIKELY(s_return_hook.fn)) {
+        s_return_hook.fn(s_return_hook.ctx);
     }
+    __builtin_trap();
 }
 
-/**
- * @brief Fiber init prologue.
- * @details Sets the user function prolog and invokes it with the user data
- *          pointer as its first argument; after it returns, calls the noreturn
- *          fiber_epilogue.
- * @note Implemented in assembly rather than inline asm because this routine
- *       makes function calls, which can clobber all registers. Setting it up
- *       in inline asm would be verbose and error prone.
- */
-extern void fiber_prologue(void);
-
-void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data) {
+void cfiber_init(cfiber_t* const fiber, cfiber_fn const func, void* const user_data) {
     ASSERT(fiber->stack);
     /* Minimal stack size to avoid certain overflow. */
     ASSERT(fiber->stack_size >= 256);
@@ -71,11 +48,14 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
     ASSERT(stack_base <= UINTPTR_MAX - fiber->stack_size);
     uintptr_t stack_top = stack_base + fiber->stack_size;
 
+    /* Slots not set below start at zero: no stale frame-pointer chain, nothing
+     * indeterminate for the first switch to load. */
+    fiber->ctx = (cfiber_context_t){0};
+
 #ifdef __x86_64__
     /* Align to a 16-byte boundary per System V AMD64 ABI. */
     uint8_t* stack_ptr = (uint8_t*)(stack_top & ~15ULL);
 
-    fiber->ctx.rbp = 0;
     fiber->ctx.rbx = (uint64_t)func;
     fiber->ctx.r12 = (uint64_t)user_data;
 
@@ -86,9 +66,10 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
     __asm__ volatile("fnstcw %0"
                      : "=m"(fiber->ctx.x87_cw));
 
-    /* Arrange for the first ret to jump into fiber_prologue. */
-    stack_ptr -= 8;
-    *(uint64_t*)stack_ptr = (uint64_t)fiber_prologue;
+    /* The first ret pops cfiber_prologue. memcpy: the stack may be a uint8_t array. */
+    const uint64_t ret = (uint64_t)cfiber_prologue;
+    stack_ptr -= sizeof ret;
+    memcpy(stack_ptr, &ret, sizeof ret);
 
     fiber->ctx.rsp = (uint64_t)stack_ptr;
 
@@ -97,15 +78,14 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
     uint8_t* stack_ptr = (uint8_t*)(stack_top & ~15ULL);
 
     fiber->ctx.sp = (uint64_t)stack_ptr;
-    fiber->ctx.x29 = 0;
 
     /* Store func + user_data in callee-saved registers so they remain valid
-     * across the call into fiber_prologue. */
+     * across the call into cfiber_prologue. */
     fiber->ctx.x19 = (uint64_t)func;
     fiber->ctx.x20 = (uint64_t)user_data;
 
     /* Link register points to the fiber startup routine. */
-    fiber->ctx.x30 = (uint64_t)&fiber_prologue;
+    fiber->ctx.x30 = (uint64_t)&cfiber_prologue;
 
     /* A new fiber inherits the creator's FP control state. */
     __asm__ volatile("mrs %0, fpcr"
@@ -121,7 +101,7 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
     fiber->ctx.r4 = (uint32_t)func;
     fiber->ctx.r5 = (uint32_t)user_data;
 
-    fiber->ctx.lr = (uint32_t)&fiber_prologue;
+    fiber->ctx.lr = (uint32_t)&cfiber_prologue;
 
 #ifdef __ARM_FP
     /* A new fiber inherits the creator's FP control state. */

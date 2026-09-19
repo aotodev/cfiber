@@ -4,12 +4,12 @@ The lowest layer of the library: a fiber is a stack plus a saved register set,
 and a context switch swaps one for the other. Everything above it (the FCFS
 scheduler, the epoll reactor, any custom driver) is built on these two headers:
 
-- [include/cfiber/fiber/context.h](../include/cfiber/fiber/context.h): `context_t` and `switch_context()`
-- [include/cfiber/fiber/fiber.h](../include/cfiber/fiber/fiber.h): `fiber_t`, `init_fiber()` and the return hook
+- [include/cfiber/fiber/context.h](../include/cfiber/fiber/context.h): `cfiber_context_t` and `cfiber_switch_context()`
+- [include/cfiber/fiber/fiber.h](../include/cfiber/fiber/fiber.h): `cfiber_t`, `cfiber_init()` and the return hook
 
 ## What a switch costs
 
-`switch_context(old, new)` is hand-written assembly and issues no syscall. It
+`cfiber_switch_context(old, new)` is hand-written assembly and issues no syscall. It
 saves the callee-saved set to `old`, restores it from `new`, and jumps. Because
 the caller-saved registers are the caller's problem by definition, they are not
 touched, which is what keeps the saved context small:
@@ -31,20 +31,21 @@ creator's settings, as a new thread would.
 
 ## Starting a fiber
 
-`init_fiber()` does not run anything. It sets the stack pointer to the top of
-the stack with the alignment the ABI requires, stores the entry function and
-user data in callee-saved registers, and arranges for the first
-`switch_context()` into the fiber to land in an architecture-specific prologue.
+`cfiber_init()` does not run anything. It zeroes the context (a `cfiber_t`
+needs no memset), sets the stack pointer to the top of the stack with the
+alignment the ABI requires, stores the entry function and user data in
+callee-saved registers, and arranges for the first `cfiber_switch_context()`
+into the fiber to land in an architecture-specific prologue.
 The prologue reads those two registers back out, calls the entry function with
 `user_data` as its only argument, and on return calls the epilogue, which never
 comes back.
 
 ```c
-fiber_t fiber = { .stack = stack_memory, .stack_size = 8192 };
-init_fiber(&fiber, my_fiber_fn, user_data);
+cfiber_t fiber = { .stack = stack_memory, .stack_size = 8192 };
+cfiber_init(&fiber, my_fiber_fn, user_data);
 
-context_t caller;
-switch_context(&caller, &fiber.ctx);   /* runs my_fiber_fn */
+cfiber_context_t caller;
+cfiber_switch_context(&caller, &fiber.ctx);   /* runs my_fiber_fn */
 ```
 
 The stack grows downward from `stack + stack_size` and must stay valid for the
@@ -57,7 +58,8 @@ A fiber's entry function has no caller to return to: there is no valid return
 address on its stack. When it returns, the epilogue instead calls the hook
 registered with `cfiber_set_return_hook()`, running on the returning fiber's
 stack. The hook must mark the fiber complete, pick the next context, and call
-`switch_context()`. It must never return normally.
+`cfiber_switch_context()`. It must never return normally: the epilogue traps if it
+does, or if no hook is registered.
 
 ```c
 cfiber_return_hook_t prev = cfiber_set_return_hook(my_hook, my_ctx);
@@ -77,7 +79,7 @@ bare-metal Cortex-M, which has no TLS.
 
 ## Driving fibers without a scheduler
 
-The scheduler is optional. `init_fiber()`, `switch_context()` and a return hook
+The scheduler is optional. `cfiber_init()`, `cfiber_switch_context()` and a return hook
 are enough to build a driver with whatever policy is wanted: priorities,
 run-to-completion, a state machine. The one obligation beyond those three is
 that a custom assembly prologue, if any, must call

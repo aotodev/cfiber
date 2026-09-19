@@ -1,5 +1,7 @@
 #include "cfiber/stack/growable_stack.h"
 
+#include "cfiber/core/internal.h"
+
 #include <assert.h>
 #include <errno.h>
 #include <stdint.h>
@@ -12,8 +14,8 @@ static size_t page_size(void) {
     return ps > 0 ? (size_t)ps : 0;
 }
 
-cstack_t cstack_growable_create(const size_t max_size) {
-    cstack_t stack = {};
+cfiber_stack_t cfiber_growable_stack_create(const size_t max_size) {
+    cfiber_stack_t stack = {};
 
     const size_t page = page_size();
     if (UNLIKELY(!page)) {
@@ -54,8 +56,8 @@ cstack_t cstack_growable_create(const size_t max_size) {
     return stack;
 }
 
-void cstack_growable_destroy(cstack_t* stack) {
-    assert(is_valid_cstack(stack));
+void cfiber_growable_stack_destroy(cfiber_stack_t* stack) {
+    assert(cfiber_stack_is_valid(stack));
 
     munmap(stack->mem_base, stack->total_size);
 
@@ -65,15 +67,15 @@ void cstack_growable_destroy(cstack_t* stack) {
     stack->total_size = 0;
 }
 
-void cstack_growable_recycle(cstack_t* const stack) {
-    assert(is_valid_cstack(stack) && "Invalid stack in recycle");
+void cfiber_growable_stack_recycle(cfiber_stack_t* const stack) {
+    assert(cfiber_stack_is_valid(stack) && "Invalid stack in recycle");
 
     const size_t page = page_size();
     /* Keep the top page warm; anything below it and above the guard goes. */
-    if (!page || cstack_usable_size(stack) <= page) {
+    if (!page || cfiber_stack_usable_size(stack) <= page) {
         return;
     }
 
-    const size_t length = cstack_usable_size(stack) - page;
+    const size_t length = cfiber_stack_usable_size(stack) - page;
     (void)madvise(stack->usable_base, length, MADV_DONTNEED);
 }

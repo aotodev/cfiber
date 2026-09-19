@@ -77,8 +77,8 @@ static int test_sbrk_bounds(void) {
  * ============================================================================ */
 
 typedef struct {
-    context_t main_ctx;
-    fiber_t fiber;
+    cfiber_context_t main_ctx;
+    cfiber_t fiber;
     void* brk;   /* _sbrk result inside the fiber */
     void* block; /* malloc result inside the fiber */
 } fixture;
@@ -92,7 +92,7 @@ static void grow_heap_in_fiber(void* user_data) {
         _sbrk(-SBRK_PROBE);
     }
     f->block = malloc(SBRK_PROBE);
-    switch_context(&f->fiber.ctx, &f->main_ctx);
+    cfiber_switch_context(&f->fiber.ctx, &f->main_ctx);
 }
 
 /* The fiber switches back to main and is never resumed. */
@@ -107,9 +107,9 @@ static int test_sbrk_inside_fiber(void) {
     ASSERT_TRUE(in_heap(fx.fiber.stack)); /* so SP is below the break in the fiber */
     fx.fiber.stack_size = FIBER_STACK_SIZE;
     memset(&fx.fiber.ctx, 0, sizeof fx.fiber.ctx);
-    init_fiber(&fx.fiber, grow_heap_in_fiber, &fx);
+    cfiber_init(&fx.fiber, grow_heap_in_fiber, &fx);
 
-    switch_context(&fx.main_ctx, &fx.fiber.ctx);
+    cfiber_switch_context(&fx.main_ctx, &fx.fiber.ctx);
 
     ASSERT_NE_PTR(fx.brk, (void*)-1);
     ASSERT_TRUE(in_heap(fx.brk));

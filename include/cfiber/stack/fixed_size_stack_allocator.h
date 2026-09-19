@@ -1,8 +1,8 @@
 /**
  * @file  fixed_size_stack_allocator.h
- * @brief Thin wrapper that pairs a multislab allocator with cstack_t descriptors.
+ * @brief Thin wrapper that pairs a multislab allocator with cfiber_stack_t descriptors.
  * @details Allocates fixed-size stack memory from a multislab and fills in a
- *          cstack_t descriptor.  Optionally instruments stacks with canary /
+ *          cfiber_stack_t descriptor.  Optionally instruments stacks with canary /
  *          watermark checks when the stack sanitizer is enabled.
  */
 
@@ -27,7 +27,8 @@ extern "C" {
  *          watermark. Under ASan, poisons CFIBER_ASAN_REDZONE bytes at
  *          mem_base; the usable stack starts above them.
  */
-[[nodiscard]] CFIBER_EXPORT int ms_stack_alloc(cstack_t* stack, multislab_t* ms) __attribute__((nonnull(1, 2)));
+[[nodiscard]] CFIBER_EXPORT int cfiber_fixed_stack_alloc(cfiber_stack_t* stack, cfiber_multislab_t* ms)
+    __attribute__((nonnull(1, 2)));
 
 /**
  * @brief Release a fixed-size stack back to a multislab.
@@ -37,7 +38,8 @@ extern "C" {
  *         or watermark exhausted), in every build type; the block is released
  *         regardless. Always true without the sanitizer.
  */
-CFIBER_EXPORT bool ms_stack_release(cstack_t* stack, multislab_t* ms) __attribute__((nonnull(1, 2)));
+CFIBER_EXPORT bool cfiber_fixed_stack_release(cfiber_stack_t* stack, cfiber_multislab_t* ms)
+    __attribute__((nonnull(1, 2)));
 
 #ifdef __cplusplus
 }

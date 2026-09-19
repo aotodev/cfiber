@@ -13,11 +13,11 @@ contiguous region into `block_count` blocks of `block_size` and tracks
 occupancy in a bitmap, so allocation and release are a scan and a bit flip with
 no per-block header and no free-list pointer stealing space from the payload.
 
-`block_size` must be a multiple of `CACHE_LINE_SIZE`, and the region must be
+`block_size` must be a multiple of `CFIBER_CACHE_LINE_SIZE`, and the region must be
 aligned to at least `alignof(max_align_t)`; blocks inherit the region's
 alignment, so a cache-line-aligned region keeps two fibers' stacks off the same
-line. The bitmap is `BITMAP_SIZE` words (`CFIBER_BITMAP_SIZE` in CMake), capping
-one slab at `MAX_BLOCK_COUNT` blocks; the multislab exists to get past that cap.
+line. The bitmap is `CFIBER_BITMAP_SIZE` words (also the CMake option), capping
+one slab at `CFIBER_SLAB_MAX_BLOCKS` blocks; the multislab exists to get past that cap.
 
 The slab owns no memory. It is the right layer when the region is a static
 array in `.bss` and the block count is known at build time.
@@ -51,18 +51,18 @@ does not need to record block sizes. It must return memory aligned to at least
 is the hook the scheduler exposes as `cfiber_scheduler_init_ext()`; see
 [freestanding.md](freestanding.md).
 
-Every stack allocator fills a `cstack_t` whose `usable_base` marks where the
+Every stack allocator fills a `cfiber_stack_t` whose `usable_base` marks where the
 fiber's stack starts: above the guard page of a growable stack, above the ASan
-redzone of a fixed-size one. Schedulers hand `init_fiber()` and the sanitizers
+redzone of a fixed-size one. Schedulers hand `cfiber_init()` and the sanitizers
 the usable range, never `mem_base`.
 
 ## Fixed-size stacks
 
 [include/cfiber/stack/fixed_size_stack_allocator.h](../include/cfiber/stack/fixed_size_stack_allocator.h)
 
-A thin pairing of a multislab with the `cstack_t` descriptor in
-[stack.h](../include/cfiber/stack/stack.h): `ms_stack_alloc()` takes a block and
-fills in the descriptor, `ms_stack_release()` hands it back. When the stack
+A thin pairing of a multislab with the `cfiber_stack_t` descriptor in
+[stack.h](../include/cfiber/stack/stack.h): `cfiber_fixed_stack_alloc()` takes a block and
+fills in the descriptor, `cfiber_fixed_stack_release()` hands it back. When the stack
 sanitizer is enabled it is also where the canary is planted and the watermark
 pattern written, so instrumentation costs the caller nothing at the call site.
 
@@ -75,7 +75,7 @@ the built-in scheduler uses everywhere.
 [growable_stack_allocator.h](../include/cfiber/stack/growable_stack_allocator.h)
 
 On a host with an MMU, a fiber does not have to commit its worst-case stack up
-front. `cstack_growable_create(max_size)` maps `max_size` plus one page with
+front. `cfiber_growable_stack_create(max_size)` maps `max_size` plus one page with
 `MAP_NORESERVE | MAP_STACK`, then `mprotect`s the lowest page to `PROT_NONE`.
 
 Growth is therefore demand paging, not a fault handler: the mapping is readable
@@ -90,12 +90,12 @@ off the bottom of the stack lands in it and faults immediately, at the
 instruction that overflowed, instead of silently corrupting whatever mapping
 happened to sit below.
 
-`growable_stack_allocator_t` pools these. It keeps up to `cache_capacity` stacks
+`cfiber_growable_stack_allocator_t` pools these. It keeps up to `cache_capacity` stacks
 for reuse and can pre-allocate `initial_cached` of them. A stack returned to the
 pool is recycled with `MADV_DONTNEED` over its grown pages, keeping the top page
 warm: that drops the physical memory while leaving the mapping and the guard
 page in place, so reuse costs no `mmap` and the next fiber starts from a small
-resident footprint. `growable_stack_allocator_destroy()` returns `-1` if stacks
+resident footprint. `cfiber_growable_stack_allocator_destroy()` returns `-1` if stacks
 are still outstanding rather than unmapping memory still in use.
 
 This is the reactor's stack source, and the one component that is hosted-only:

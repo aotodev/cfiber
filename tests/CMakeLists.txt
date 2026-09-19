@@ -117,6 +117,7 @@ if(NOT CFIBER_FREESTANDING)
     )
     target_include_directories(test_defensive PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${PROJECT_SOURCE_DIR}/src
         $<TARGET_PROPERTY:cfiber,INTERFACE_INCLUDE_DIRECTORIES>)
     target_compile_definitions(test_defensive PRIVATE
         NDEBUG CFIBER_DEFENSIVE=1 _GNU_SOURCE

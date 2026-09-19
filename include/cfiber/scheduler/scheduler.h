@@ -22,7 +22,6 @@
 #include "cfiber/memory/multislab_alloc.h"
 #include "cfiber/stack/stack.h"
 
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -37,13 +36,13 @@ extern "C" {
 /**
  * @brief Internal task node linking a fiber to the scheduler's ready queue.
  * @details Each spawned fiber is represented by a cfiber_task_t that embeds the
- *          fiber_t and a singly-linked-list pointer for the FIFO ready queue.
+ *          cfiber_t and a singly-linked-list pointer for the FIFO ready queue.
  */
 typedef struct cfiber_task {
     /** Embedded fiber (context + stack pointer). */
-    fiber_t fiber;
-    /** The stack block, as handed out by ms_stack_alloc(). */
-    cstack_t stack;
+    cfiber_t fiber;
+    /** The stack block, as handed out by cfiber_fixed_stack_alloc(). */
+    cfiber_stack_t stack;
     /** Next node in the ready queue (or NULL). */
     struct cfiber_task* next;
 } cfiber_task_t;
@@ -56,9 +55,9 @@ typedef struct cfiber_task {
  */
 typedef struct cfiber_scheduler {
     /** Slab allocator for cfiber_task_t nodes. */
-    multislab_t task_alloc;
+    cfiber_multislab_t task_alloc;
     /** Slab allocator for fiber stack memory. */
-    multislab_t stack_alloc;
+    cfiber_multislab_t stack_alloc;
 
     /** Currently executing task (not in the queue). */
     cfiber_task_t* current;
@@ -71,7 +70,7 @@ typedef struct cfiber_scheduler {
     cfiber_task_t* ready_tail;
 
     /** Saved context of the scheduler loop. */
-    context_t sched_ctx;
+    cfiber_context_t sched_ctx;
     /** Per-fiber stack size in bytes. */
     size_t stack_size;
     /** Highest stack usage seen among completed fibers (stack sanitizer only). */
@@ -84,7 +83,8 @@ typedef struct cfiber_scheduler {
  * @brief Configuration for scheduler initialisation.
  */
 typedef struct {
-    /** Size of each fiber stack in bytes. Must be >= 256 and a multiple of CACHE_LINE_SIZE. */
+    /** Usable bytes per fiber stack, >= 256. The block carved per fiber is this
+     *  rounded up to a cache line, plus the ASan redzone when enabled. */
     size_t stack_size;
     /** Fibers (and stacks) per slab. 0 selects the default (16). */
     uint32_t fibers_per_slab;
@@ -145,7 +145,7 @@ CFIBER_EXPORT void cfiber_scheduler_destroy(cfiber_scheduler_t* sched) __attribu
  * @note Safe to call both before cfiber_scheduler_run() (to seed the initial
  *       set of fibers) and from within a running fiber (dynamic spawning).
  */
-CFIBER_EXPORT bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, fiber_fn func, void* user_data)
+CFIBER_EXPORT bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, cfiber_fn func, void* user_data)
     __attribute__((nonnull(1, 2)));
 
 /**
@@ -196,7 +196,7 @@ CFIBER_EXPORT void cfiber_yield(void);
  * @return true on success.
  * @pre Must be called from within a running fiber (scheduler active).
  */
-CFIBER_EXPORT bool cfiber_spawn(fiber_fn func, void* user_data) __attribute__((nonnull(1)));
+CFIBER_EXPORT bool cfiber_spawn(cfiber_fn func, void* user_data) __attribute__((nonnull(1)));
 
 #ifdef __cplusplus
 }

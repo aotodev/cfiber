@@ -23,8 +23,8 @@
  * word-aligned, so the fake stacks are too. */
 #define STACK_BUF alignas(uint64_t) uint8_t
 
-static cstack_t make_stack(uint8_t* buf, size_t size) {
-    return (cstack_t){
+static cfiber_stack_t make_stack(uint8_t* buf, size_t size) {
+    return (cfiber_stack_t){
         .mem_base = buf,
         .usable_base = buf,
         .stack_top = buf + size,
@@ -34,58 +34,58 @@ static cstack_t make_stack(uint8_t* buf, size_t size) {
 
 static int test_canary_initialised_and_valid(void) {
     STACK_BUF buf[BUF_SIZE];
-    cstack_t s = make_stack(buf, sizeof(buf));
+    cfiber_stack_t s = make_stack(buf, sizeof(buf));
 
-    cstack_debug_stack_init(&s);
-    ASSERT_TRUE(cstack_debug_stack_check_canary(&s));
+    cfiber_stack_debug_init(&s);
+    ASSERT_TRUE(cfiber_stack_debug_check_canary(&s));
     return 0;
 }
 
 static int test_watermark_zero_after_init(void) {
     STACK_BUF buf[BUF_SIZE];
-    cstack_t s = make_stack(buf, sizeof(buf));
+    cfiber_stack_t s = make_stack(buf, sizeof(buf));
 
-    cstack_debug_stack_init(&s);
+    cfiber_stack_debug_init(&s);
     /* freshly painted: nothing has been used yet */
-    ASSERT_EQ_U64(cstack_debug_stack_used_bytes(&s), 0);
+    ASSERT_EQ_U64(cfiber_stack_debug_used_bytes(&s), 0);
     return 0;
 }
 
 static int test_watermark_detects_usage(void) {
     STACK_BUF buf[BUF_SIZE];
-    cstack_t s = make_stack(buf, sizeof(buf));
+    cfiber_stack_t s = make_stack(buf, sizeof(buf));
 
-    cstack_debug_stack_init(&s);
+    cfiber_stack_debug_init(&s);
 
     /* Stacks grow down: simulate usage by overwriting the top 256 bytes. The
      * watermark scans upward from just above the canary, so the deepest used
      * offset corresponds to exactly the 256-byte region we scribbled. */
     memset(buf + sizeof(buf) - 256, 0, 256);
-    ASSERT_EQ_U64(cstack_debug_stack_used_bytes(&s), 256);
+    ASSERT_EQ_U64(cfiber_stack_debug_used_bytes(&s), 256);
     return 0;
 }
 
 static int test_used_bytes_signals_overflow_on_canary_smash(void) {
     STACK_BUF buf[BUF_SIZE];
-    cstack_t s = make_stack(buf, sizeof(buf));
+    cfiber_stack_t s = make_stack(buf, sizeof(buf));
 
-    cstack_debug_stack_init(&s);
-    *cstack_debug_canary_addr(&s) = 0; /* smash */
+    cfiber_stack_debug_init(&s);
+    *cfiber_stack_debug_canary_addr(&s) = 0; /* smash */
 
     /* a corrupted canary makes usage meaningless: reported as (size_t)-1 */
-    ASSERT_EQ_U64(cstack_debug_stack_used_bytes(&s), (uint64_t)(size_t)-1);
+    ASSERT_EQ_U64(cfiber_stack_debug_used_bytes(&s), (uint64_t)(size_t)-1);
     return 0;
 }
 
 static int test_canary_smash_detected(void) {
     STACK_BUF buf[BUF_SIZE];
-    cstack_t s = make_stack(buf, sizeof(buf));
+    cfiber_stack_t s = make_stack(buf, sizeof(buf));
 
-    cstack_debug_stack_init(&s);
-    ASSERT_TRUE(cstack_debug_stack_check_canary(&s));
+    cfiber_stack_debug_init(&s);
+    ASSERT_TRUE(cfiber_stack_debug_check_canary(&s));
 
-    *cstack_debug_canary_addr(&s) = 0;
-    ASSERT_FALSE(cstack_debug_stack_check_canary(&s));
+    *cfiber_stack_debug_canary_addr(&s) = 0;
+    ASSERT_FALSE(cfiber_stack_debug_check_canary(&s));
     return 0;
 }
 
@@ -93,22 +93,22 @@ static int test_canary_smash_detected(void) {
  * watermark used down to the canary is an overflow. */
 static int test_overflowed_predicate(void) {
     STACK_BUF buf[BUF_SIZE];
-    cstack_t s = make_stack(buf, sizeof(buf));
+    cfiber_stack_t s = make_stack(buf, sizeof(buf));
 
-    cstack_debug_stack_init(&s);
-    ASSERT_FALSE(cstack_debug_stack_overflowed(&s));
+    cfiber_stack_debug_init(&s);
+    ASSERT_FALSE(cfiber_stack_debug_overflowed(&s));
 
     memset(buf + sizeof(buf) - 256, 0, 256);
-    ASSERT_FALSE(cstack_debug_stack_overflowed(&s));
+    ASSERT_FALSE(cfiber_stack_debug_overflowed(&s));
 
     /* every watermark byte touched, canary still intact */
-    memset(cstack_debug_watermark_begin(&s), 0, cstack_debug_watermark_size(&s));
-    ASSERT_TRUE(cstack_debug_stack_check_canary(&s));
-    ASSERT_TRUE(cstack_debug_stack_overflowed(&s));
+    memset(cfiber_stack_debug_watermark_begin(&s), 0, cfiber_stack_debug_watermark_size(&s));
+    ASSERT_TRUE(cfiber_stack_debug_check_canary(&s));
+    ASSERT_TRUE(cfiber_stack_debug_overflowed(&s));
 
-    cstack_debug_stack_init(&s);
-    *cstack_debug_canary_addr(&s) = 0;
-    ASSERT_TRUE(cstack_debug_stack_overflowed(&s));
+    cfiber_stack_debug_init(&s);
+    *cfiber_stack_debug_canary_addr(&s) = 0;
+    ASSERT_TRUE(cfiber_stack_debug_overflowed(&s));
     return 0;
 }
 

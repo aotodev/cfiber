@@ -3,14 +3,14 @@
 .text
 
 .thumb_func
-.global switch_context
-.type switch_context, %function
+.global cfiber_switch_context
+.type cfiber_switch_context, %function
 
-# void switch_context(context_t* old, const context_t* new)
+# void cfiber_switch_context(cfiber_context_t* old, const cfiber_context_t* new)
 # r0 = old context pointer
 # r1 = new context pointer
 
-switch_context:
+cfiber_switch_context:
     # -------------------------------------
     # 1) Save current context to old (r0)
     # -------------------------------------
@@ -58,4 +58,4 @@ switch_context:
     # return
     bx lr
 
-.size switch_context, .-switch_context
+.size cfiber_switch_context, .-cfiber_switch_context

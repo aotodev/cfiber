@@ -1,17 +1,17 @@
 /**
  * @file  context_switch_unit_tests.c
- * @brief Register preservation and entry-state tests for switch_context().
+ * @brief Register preservation and entry-state tests for cfiber_switch_context().
  *
  * @details
  * The register traffic is in cfiber_test_switch_regs() (switch_regs_<arch>.S):
- * load a pattern into every callee-saved register, switch_context(), store the
+ * load a pattern into every callee-saved register, cfiber_switch_context(), store the
  * set on return. No compiler-generated code runs in between, so the result does
  * not depend on register allocation, optimisation level or sanitizer
  * instrumentation.
  *
  * Two fibers switch to each other through the helper, each with its own
  * pattern. While one is switched out, the other reads the callee-saved slots of
- * its context_t. That catches a save-side slot mix-up the load/store round trip
+ * its cfiber_context_t. That catches a save-side slot mix-up the load/store round trip
  * alone cannot: save r12 into r13's slot, restore r12 from r13's slot, and the
  * round trip still passes.
  *
@@ -49,11 +49,11 @@
 
 static const char* const reg_names[REG_COUNT] = {"rbx", "rbp", "r12", "r13", "r14", "r15"};
 
-static uintptr_t ctx_sp(const context_t* ctx) {
+static uintptr_t ctx_sp(const cfiber_context_t* ctx) {
     return ctx->rsp;
 }
 
-static void ctx_regs(const context_t* ctx, uintptr_t out[REG_COUNT]) {
+static void ctx_regs(const cfiber_context_t* ctx, uintptr_t out[REG_COUNT]) {
     out[0] = ctx->rbx;
     out[1] = ctx->rbp;
     out[2] = ctx->r12;
@@ -89,7 +89,7 @@ static const char* const reg_names[REG_COUNT] = {"x19",
                                                  "d14",
                                                  "d15"};
 
-static uintptr_t ctx_sp(const context_t* ctx) {
+static uintptr_t ctx_sp(const cfiber_context_t* ctx) {
     return ctx->sp;
 }
 
@@ -99,7 +99,7 @@ static uintptr_t bits(double d) {
     return b;
 }
 
-static void ctx_regs(const context_t* ctx, uintptr_t out[REG_COUNT]) {
+static void ctx_regs(const cfiber_context_t* ctx, uintptr_t out[REG_COUNT]) {
     out[0] = ctx->x19;
     out[1] = ctx->x20;
     out[2] = ctx->x21;
@@ -139,7 +139,7 @@ static const char* const reg_names[REG_COUNT] = {
 #endif
 };
 
-static uintptr_t ctx_sp(const context_t* ctx) {
+static uintptr_t ctx_sp(const cfiber_context_t* ctx) {
     return ctx->sp;
 }
 
@@ -151,7 +151,7 @@ static uintptr_t bits(float f) {
 }
 #endif
 
-static void ctx_regs(const context_t* ctx, uintptr_t out[REG_COUNT]) {
+static void ctx_regs(const cfiber_context_t* ctx, uintptr_t out[REG_COUNT]) {
     out[0] = ctx->r4;
     out[1] = ctx->r5;
     out[2] = ctx->r6;
@@ -188,10 +188,10 @@ static void ctx_regs(const context_t* ctx, uintptr_t out[REG_COUNT]) {
  * Assembly helpers (switch_regs_<arch>.S)
  * ============================================================================ */
 
-/* Loads magic into the callee-saved set, switch_context(self, other), stores
+/* Loads magic into the callee-saved set, cfiber_switch_context(self, other), stores
  * the set into out once resumed. */
-void cfiber_test_switch_regs(context_t* self,
-                             context_t* other,
+void cfiber_test_switch_regs(cfiber_context_t* self,
+                             cfiber_context_t* other,
                              const uintptr_t magic[REG_COUNT],
                              uintptr_t out[REG_COUNT]);
 
@@ -209,9 +209,9 @@ enum step : uint8_t {
 };
 
 typedef struct {
-    context_t main_ctx;
-    fiber_t test_fiber;
-    fiber_t intermediary;
+    cfiber_context_t main_ctx;
+    cfiber_t test_fiber;
+    cfiber_t intermediary;
 
     enum step trace[4];
     size_t trace_len;
@@ -223,13 +223,13 @@ typedef struct {
     uintptr_t magic_b[REG_COUNT];
     uintptr_t out_a[REG_COUNT];   /* registers on return from the helper */
     uintptr_t out_b[REG_COUNT];   /* never filled: the intermediary is not resumed */
-    uintptr_t saved_a[REG_COUNT]; /* context_t slots, read while switched out */
+    uintptr_t saved_a[REG_COUNT]; /* cfiber_context_t slots, read while switched out */
     uintptr_t saved_b[REG_COUNT];
     uintptr_t saved_sp_a;
     uintptr_t saved_sp_b;
 
     /* return hook: a fiber whose function returns lands in the epilogue */
-    fiber_t returning;
+    cfiber_t returning;
     int hook_calls;
     void* hook_ctx;
 
@@ -261,7 +261,7 @@ static void return_hook(void* ctx) {
     fixture* f = ctx;
     f->hook_calls++;
     f->hook_ctx = ctx;
-    switch_context(&f->returning.ctx, &f->main_ctx);
+    cfiber_switch_context(&f->returning.ctx, &f->main_ctx);
     abort(); /* a hook must never be resumed */
 }
 
@@ -269,18 +269,17 @@ static void returning_main(void* user_data) {
     (void)user_data; /* returns: the epilogue must call the hook */
 }
 
-static bool setup_fiber(fiber_t* fiber, fiber_fn fn) {
+static bool setup_fiber(cfiber_t* fiber, cfiber_fn fn) {
     fiber->stack = malloc(STACK_SIZE);
     if (!fiber->stack) {
         return false;
     }
     fiber->stack_size = STACK_SIZE;
-    memset(&fiber->ctx, 0, sizeof fiber->ctx);
-    init_fiber(fiber, fn, &fx);
+    cfiber_init(fiber, fn, &fx);
     return true;
 }
 
-static void teardown_fiber(fiber_t* fiber) {
+static void teardown_fiber(cfiber_t* fiber) {
     free(fiber->stack);
     fiber->stack = nullptr;
 }
@@ -303,7 +302,7 @@ void cfiber_test_fiber_main(void* user_data, uintptr_t entry_sp) {
     ctx_regs(&f->intermediary.ctx, f->saved_b);
     f->saved_sp_b = ctx_sp(&f->intermediary.ctx);
 
-    switch_context(&f->test_fiber.ctx, &f->main_ctx);
+    cfiber_switch_context(&f->test_fiber.ctx, &f->main_ctx);
 }
 
 static void intermediary_main(void* user_data) {
@@ -330,7 +329,7 @@ static int test_round_trip(void) {
     ASSERT_TRUE(setup_fiber(&fx.test_fiber, cfiber_test_fiber_entry));
     ASSERT_TRUE(setup_fiber(&fx.intermediary, intermediary_main));
 
-    switch_context(&fx.main_ctx, &fx.test_fiber.ctx);
+    cfiber_switch_context(&fx.main_ctx, &fx.test_fiber.ctx);
     fx.round_in_main = fegetround();
     return 0;
 }
@@ -354,14 +353,51 @@ static int test_round_trip(void) {
  * registered with cfiber_set_return_hook() with its context. */
 static int test_return_hook_invoked(void) {
     ASSERT_TRUE(setup_fiber(&fx.returning, returning_main));
-    switch_context(&fx.main_ctx, &fx.returning.ctx);
+    cfiber_switch_context(&fx.main_ctx, &fx.returning.ctx);
     ASSERT_EQ_U32(fx.hook_calls, 1);
     ASSERT_EQ_PTR(fx.hook_ctx, &fx);
     teardown_fiber(&fx.returning);
     return 0;
 }
 
-static bool within_stack(const fiber_t* fiber, uintptr_t sp) {
+static bool all_zero(const void* p, size_t n) {
+    const uint8_t* b = p;
+    for (size_t i = 0; i < n; i++) {
+        if (b[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+#define ASSERT_ZERO(field) ASSERT_TRUE(all_zero(&(field), sizeof(field)))
+
+/* Slots cfiber_init does not set start at zero rather than whatever the struct held. */
+static int test_init_zeroes_context(void) {
+    cfiber_t fiber;
+    memset(&fiber.ctx, 0xAB, sizeof fiber.ctx);
+    ASSERT_TRUE(setup_fiber(&fiber, returning_main));
+#ifdef __x86_64__
+    ASSERT_ZERO(fiber.ctx.rbp);
+    ASSERT_ZERO(fiber.ctx.r13);
+    ASSERT_ZERO(fiber.ctx.r14);
+    ASSERT_ZERO(fiber.ctx.r15);
+#elifdef __aarch64__
+    ASSERT_ZERO(fiber.ctx.x21);
+    ASSERT_ZERO(fiber.ctx.x28);
+    ASSERT_ZERO(fiber.ctx.x29);
+    ASSERT_ZERO(fiber.ctx.v8);
+    ASSERT_ZERO(fiber.ctx.v15);
+#elifdef __arm__
+    ASSERT_ZERO(fiber.ctx.r6);
+    ASSERT_ZERO(fiber.ctx.r7);
+    ASSERT_ZERO(fiber.ctx.r11);
+#endif
+    teardown_fiber(&fiber);
+    return 0;
+}
+
+static bool within_stack(const cfiber_t* fiber, uintptr_t sp) {
     const uintptr_t base = (uintptr_t)fiber->stack;
     return sp >= base && sp <= base + fiber->stack_size;
 }
@@ -386,7 +422,7 @@ static int test_registers_restored(void) {
     return 0;
 }
 
-/* Save side: the context_t slots hold the pattern while switched out. */
+/* Save side: the cfiber_context_t slots hold the pattern while switched out. */
 static int test_registers_saved(void) {
     ASSERT_REGS_EQ(fx.saved_a, fx.magic_a);
     ASSERT_REGS_EQ(fx.saved_b, fx.magic_b);
@@ -425,6 +461,7 @@ int main(void) {
     RUN_TEST(test_fp_control_preserved);
 #endif
     RUN_TEST(test_return_hook_invoked);
+    RUN_TEST(test_init_zeroes_context);
 
     teardown_fiber(&fx.test_fiber);
     teardown_fiber(&fx.intermediary);

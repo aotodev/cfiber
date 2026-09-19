@@ -20,27 +20,27 @@ extern "C" {
 /* Layout-affecting: the CMake option CFIBER_BITMAP_SIZE sets it PUBLIC for the
  * library and its consumers alike. The default here is for builds outside
  * CMake and must match the library's. */
-#ifndef BITMAP_SIZE
-#define BITMAP_SIZE 8U
+#ifndef CFIBER_BITMAP_SIZE
+#define CFIBER_BITMAP_SIZE 8U
 #endif
 
-constexpr uint32_t MAX_BLOCK_COUNT = BITMAP_WORD_BITS * BITMAP_SIZE;
+constexpr uint32_t CFIBER_SLAB_MAX_BLOCKS = CFIBER_BITMAP_WORD_BITS * CFIBER_BITMAP_SIZE;
 
-typedef struct slab_struct {
+typedef struct cfiber_slab {
     /** User-provided slab base. */
     void* memory;
     /** Size of each block. */
     size_t block_size;
     /** Total number of blocks. */
     uint32_t block_count;
-    bitmap_t bitmap[BITMAP_SIZE];
+    cfiber_bitmap_t bitmap[CFIBER_BITMAP_SIZE];
     uint32_t bitmap_count;
-} slab_t;
+} cfiber_slab_t;
 
 /**
  * @brief Initialize a slab allocator with user-provided memory.
  * @param alloc       The allocator to initialize.
- * @param block_size  Size of each block (must be a multiple of CACHE_LINE_SIZE).
+ * @param block_size  Size of each block (must be a multiple of CFIBER_CACHE_LINE_SIZE).
  * @param memory      Pointer to the memory region, aligned to at least
  *                    alignof(max_align_t). Blocks inherit this alignment, so
  *                    a cache-line-aligned region keeps blocks off shared lines.
@@ -48,7 +48,7 @@ typedef struct slab_struct {
  * @return 0 on success, -1 on error (bad sizes, misaligned memory, more blocks
  *         than the bitmap holds).
  */
-CFIBER_EXPORT int slab_init(slab_t* alloc, size_t block_size, void* memory, size_t memory_size)
+CFIBER_EXPORT int cfiber_slab_init(cfiber_slab_t* alloc, size_t block_size, void* memory, size_t memory_size)
     __attribute__((nonnull(1, 3)));
 
 /**
@@ -56,7 +56,7 @@ CFIBER_EXPORT int slab_init(slab_t* alloc, size_t block_size, void* memory, size
  * @param alloc The allocator to use.
  * @return Pointer to the block, or nullptr if no free block is available.
  */
-[[nodiscard]] CFIBER_EXPORT void* slab_alloc(slab_t* alloc) __attribute__((nonnull(1)));
+[[nodiscard]] CFIBER_EXPORT void* cfiber_slab_alloc(cfiber_slab_t* alloc) __attribute__((nonnull(1)));
 
 /**
  * @brief Release a block back to the slab.
@@ -67,13 +67,13 @@ CFIBER_EXPORT int slab_init(slab_t* alloc, size_t block_size, void* memory, size
  *         which case the slab is untouched. Rejection asserts in debug builds
  *         and is only observable with NDEBUG and CFIBER_DEFENSIVE.
  */
-CFIBER_EXPORT bool slab_release(slab_t* alloc, void* block) __attribute__((nonnull(1, 2)));
+CFIBER_EXPORT bool cfiber_slab_release(cfiber_slab_t* alloc, void* block) __attribute__((nonnull(1, 2)));
 
 /**
  * @brief Reset the allocator bookkeeping (user still owns the backing memory).
  * @param alloc The allocator to reset.
  */
-CFIBER_EXPORT void slab_reset(slab_t* alloc) __attribute__((nonnull(1)));
+CFIBER_EXPORT void cfiber_slab_reset(cfiber_slab_t* alloc) __attribute__((nonnull(1)));
 
 #ifdef __cplusplus
 }

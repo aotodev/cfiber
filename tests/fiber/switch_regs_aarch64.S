@@ -1,6 +1,6 @@
 .text
 
-// void cfiber_test_switch_regs(context_t* self, context_t* other,
+// void cfiber_test_switch_regs(cfiber_context_t* self, cfiber_context_t* other,
 //                              const uintptr_t magic[19], uintptr_t out[19])
 // Slot order: x19-x28, x29, d8-d15.
 // Loads magic into the callee-saved set, switches, stores the set on return.
@@ -34,7 +34,7 @@ cfiber_test_switch_regs:
     ldp     d12, d13, [x2, #120]
     ldp     d14, d15, [x2, #136]
 
-    bl      switch_context
+    bl      cfiber_switch_context
 
     ldr     x3, [sp, #160]
     stp     x19, x20, [x3, #0]

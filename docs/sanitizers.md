@@ -52,7 +52,7 @@ place.
   guard region. Poison `CFIBER_ASAN_REDZONE` bytes below each usable stack on
   allocation, unpoison on release.
 - `cfiber_asan_switch(from, to, to_stack_low, to_stack_size, finishing)`:
-  replaces `switch_context()`. Pass the target stack's low address and size, and
+  replaces `cfiber_switch_context()`. Pass the target stack's low address and size, and
   `finishing = true` only when the outgoing fiber is terminating, so its fake
   stack is discarded rather than saved for a resume that will never come.
 - `cfiber_asan_on_fiber_entry()`: call once at the very top of a freshly started
@@ -79,12 +79,12 @@ guard pages. Header:
 - **Watermark**: the rest of the stack is painted `0xA5` on allocation. On
   release, scanning up from the bottom to the first byte that is no longer
   `0xA5` gives the peak usage the fiber actually reached.
-  `cstack_debug_stack_used_bytes()` returns `(size_t)-1` when the canary is
+  `cfiber_stack_debug_used_bytes()` returns `(size_t)-1` when the canary is
   already corrupt, since the measurement is meaningless once the stack has
   overflowed. A fiber that legitimately writes `0xA5` at its deepest point
   under-reports by that much.
 
-A stack counts as overflowed (`cstack_debug_stack_overflowed()`) when the canary
+A stack counts as overflowed (`cfiber_stack_debug_overflowed()`) when the canary
 is gone or the watermark is used down to the canary: a large frame or an indexed
 write can step clean over one word, and a stack used to its last byte has
 nothing left to catch that.
@@ -94,8 +94,8 @@ size is fixed at configure time and there is no MMU to catch a mistake, it turns
 stack sizing from a guess into a measurement: run the worst-case workload, read
 the peak, add headroom.
 
-Both hook into the fixed-size stack allocator: `ms_stack_alloc()` plants and
-paints, `ms_stack_release()` checks and returns `false` on overflow. The
+Both hook into the fixed-size stack allocator: `cfiber_fixed_stack_alloc()` plants and
+paints, `cfiber_fixed_stack_release()` checks and returns `false` on overflow. The
 built-in scheduler allocates every fiber stack through them, traps when a freed
 fiber overflowed (neighbouring stacks in the slab may already be corrupt), and
 accumulates the peak in `cfiber_scheduler_stack_peak()`.

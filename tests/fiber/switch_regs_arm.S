@@ -2,7 +2,7 @@
 .thumb
 .text
 
-// void cfiber_test_switch_regs(context_t* self, context_t* other,
+// void cfiber_test_switch_regs(cfiber_context_t* self, cfiber_context_t* other,
 //                              const uintptr_t magic[N], uintptr_t out[N])
 // Slot order: r4-r11, then s16-s31 when __ARM_FP (N = 8 or 24).
 // Loads magic into the callee-saved set, switches, stores the set on return.
@@ -42,7 +42,7 @@ cfiber_test_switch_regs:
     vldmia  r2, {s16-s31}
 #endif
 
-    bl      switch_context
+    bl      cfiber_switch_context
 
     pop     {r3}
     stmia   r3!, {r4-r7}

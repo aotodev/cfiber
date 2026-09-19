@@ -1,5 +1,6 @@
 #include "cfiber/stack/fixed_size_stack_allocator.h"
 
+#include "cfiber/core/internal.h"
 #include "cfiber/debug/asan.h"
 #include "cfiber/stack/debug/stack_sanitize.h"
 
@@ -7,8 +8,8 @@
 #error "CFIBER_STACK_SANITIZER and AddressSanitizer are mutually exclusive: the canary lands in the ASan redzone"
 #endif
 
-int ms_stack_alloc(cstack_t* stack, multislab_t* ms) {
-    void* mem = multislab_alloc(ms);
+int cfiber_fixed_stack_alloc(cfiber_stack_t* stack, cfiber_multislab_t* ms) {
+    void* mem = cfiber_multislab_alloc(ms);
     if (UNLIKELY(!mem)) {
         return -1;
     }
@@ -18,7 +19,7 @@ int ms_stack_alloc(cstack_t* stack, multislab_t* ms) {
     stack->stack_top = (char*)mem + ms->block_size;
     stack->total_size = ms->block_size;
 
-    cstack_debug_stack_init(stack);
+    cfiber_stack_debug_init(stack);
 
     /* Under ASan, poison a guard at the bottom of the block. The usable stack
      * then starts at mem_base + CFIBER_ASAN_REDZONE; a downward overflow past
@@ -28,10 +29,10 @@ int ms_stack_alloc(cstack_t* stack, multislab_t* ms) {
     return 0;
 }
 
-bool ms_stack_release(cstack_t* stack, multislab_t* ms) {
+bool cfiber_fixed_stack_release(cfiber_stack_t* stack, cfiber_multislab_t* ms) {
     /* Checked in every build: the sanitizer is opt-in, so its cost is accepted. */
-    const bool ok = !cstack_debug_stack_overflowed(stack);
+    const bool ok = !cfiber_stack_debug_overflowed(stack);
     cfiber_asan_unpoison(stack->mem_base, CFIBER_ASAN_REDZONE);
-    multislab_release(ms, stack->mem_base);
+    cfiber_multislab_release(ms, stack->mem_base);
     return ok;
 }

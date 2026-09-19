@@ -87,12 +87,12 @@ designed to keep that traffic low either way. See [memory.md](memory.md).
 
 ## Without the scheduler
 
-Fibers can be driven directly with `init_fiber()` and `switch_context()`, with
+Fibers can be driven directly with `cfiber_init()` and `cfiber_switch_context()`, with
 the user registering a completion handler through `cfiber_set_return_hook()`.
 See [fibers.md](fibers.md).
 
-The relevant allocators for a scheduler-free setup are `slab_t` over a static
-array, and `ms_stack_alloc()` if a multislab is preferred.
+The relevant allocators for a scheduler-free setup are `cfiber_slab_t` over a static
+array, and `cfiber_fixed_stack_alloc()` if a multislab is preferred.
 
 ## Sizing stacks
 
