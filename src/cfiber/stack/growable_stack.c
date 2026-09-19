@@ -1,37 +1,31 @@
 #include "cfiber/stack/growable_stack.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
-static thread_local size_t tl_page_size = 0;
-
-static size_t get_page_size(void) {
-    if (LIKELY(tl_page_size)) {
-        return tl_page_size;
-    }
-
+/* 0 if the page size cannot be queried; callers fail with errno set. */
+static size_t page_size(void) {
     const long ps = sysconf(_SC_PAGESIZE);
-    if (UNLIKELY(ps <= 0)) {
-        perror("sysconf(_SC_PAGESIZE)");
-        _exit(EXIT_FAILURE);
-    }
-
-    tl_page_size = (size_t)ps;
-    return tl_page_size;
+    return ps > 0 ? (size_t)ps : 0;
 }
 
 cstack_t cstack_growable_create(const size_t max_size) {
-    assert(get_page_size() && "page size must be queryable before allocating a growable stack");
-
     cstack_t stack = {};
 
+    const size_t page = page_size();
+    if (UNLIKELY(!page)) {
+        return stack; /* errno from sysconf */
+    }
+    if (UNLIKELY(!max_size || (max_size & (page - 1)) || max_size > SIZE_MAX - page)) {
+        errno = EINVAL;
+        return stack;
+    }
+
     /* stack + bottom guard page */
-    size_t total_vma_size = max_size + get_page_size();
+    const size_t total_vma_size = max_size + page;
 
     /* allocates physical memory lazily with MAP_NORESERVE */
     void* vma_start = mmap(nullptr,
@@ -40,15 +34,20 @@ cstack_t cstack_growable_create(const size_t max_size) {
                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK | MAP_NORESERVE,
                            -1,
                            0);
-
     if (UNLIKELY(vma_start == MAP_FAILED)) {
         return stack;
     }
 
-    /* Hard guard page at the bottom */
-    mprotect(vma_start, get_page_size(), PROT_NONE);
+    /* Hard guard page at the bottom. A stack without it is not one we hand out. */
+    if (UNLIKELY(mprotect(vma_start, page, PROT_NONE) < 0)) {
+        const int saved = errno;
+        munmap(vma_start, total_vma_size);
+        errno = saved;
+        return stack;
+    }
 
     stack.mem_base = vma_start;
+    stack.usable_base = (char*)vma_start + page;
     stack.stack_top = (char*)vma_start + total_vma_size;
     stack.total_size = total_vma_size;
 
@@ -61,25 +60,20 @@ void cstack_growable_destroy(cstack_t* stack) {
     munmap(stack->mem_base, stack->total_size);
 
     stack->mem_base = nullptr;
+    stack->usable_base = nullptr;
     stack->stack_top = nullptr;
     stack->total_size = 0;
 }
 
 void cstack_growable_recycle(cstack_t* const stack) {
-    assert(stack && stack->mem_base && "Invalid stack in recycle");
+    assert(is_valid_cstack(stack) && "Invalid stack in recycle");
 
-    /* We need at least 2 pages (guard page + 1 usable page) to do anything meaningful */
-    if (stack->total_size <= 2 * get_page_size()) {
+    const size_t page = page_size();
+    /* Keep the top page warm; anything below it and above the guard goes. */
+    if (!page || cstack_usable_size(stack) <= page) {
         return;
     }
 
-    /* the actual usable bottom of the stack (just above the PROT_NONE guard page) */
-    void* const valid_bottom = (char*)stack->mem_base + get_page_size();
-
-    /* we want to keep the top page warm */
-    const void* const keep_limit = (char*)stack->stack_top - get_page_size();
-
-    const size_t length = (uintptr_t)keep_limit - (uintptr_t)valid_bottom;
-
-    (void)madvise(valid_bottom, length, MADV_DONTNEED);
+    const size_t length = cstack_usable_size(stack) - page;
+    (void)madvise(stack->usable_base, length, MADV_DONTNEED);
 }

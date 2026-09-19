@@ -1,5 +1,6 @@
 #include "cfiber/memory/slab_alloc.h"
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -49,8 +50,12 @@ int slab_init(slab_t* alloc, size_t block_size, void* memory, size_t memory_size
         ASSERT(false && "Invalid block size or memory size");
         return -1;
     }
-    const uint32_t count = (uint32_t)(memory_size / block_size);
-
+    /* The canary and init_fiber rely on the base alignment of every block. */
+    if (UNLIKELY((uintptr_t)memory % alignof(max_align_t))) {
+        ASSERT(false && "slab memory must be aligned to max_align_t");
+        return -1;
+    }
+    const size_t count = memory_size / block_size; /* checked before narrowing */
     if (UNLIKELY(count > MAX_BLOCK_COUNT)) {
         ASSERT(false && "Exceeded max block count for bitmap");
         return -1;
@@ -58,9 +63,9 @@ int slab_init(slab_t* alloc, size_t block_size, void* memory, size_t memory_size
 
     alloc->memory = memory;
     alloc->block_size = block_size;
-    alloc->block_count = count;
+    alloc->block_count = (uint32_t)count;
     /* calculate how many BITMAP_WORD_BITS words we actually need to iterate through */
-    alloc->bitmap_count = (count + BITMAP_WORD_BITS - 1) / BITMAP_WORD_BITS;
+    alloc->bitmap_count = (alloc->block_count + BITMAP_WORD_BITS - 1) / BITMAP_WORD_BITS;
 
     memset(alloc->bitmap, 0, BITMAP_SIZE * sizeof(bitmap_t));
 

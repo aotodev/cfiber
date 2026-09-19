@@ -61,6 +61,20 @@ typedef struct {
     void* mem_ctx;
 } multislab_t;
 
+/**
+ * @brief Initialise a multislab over a caller-supplied backing allocator.
+ * @param block_size           Multiple of CACHE_LINE_SIZE.
+ * @param blocks_per_slab      1..MAX_BLOCK_COUNT; block_size * blocks_per_slab
+ *                             must not overflow.
+ * @param max_slabs            Growth cap; 0 = unlimited.
+ * @param hysteresis_threshold Empty slabs kept before one is returned.
+ * @param mem_alloc            Returns a block of the requested size aligned to
+ *                             at least alignof(max_align_t), or NULL. Cache-line
+ *                             alignment keeps fiber stacks off shared lines.
+ * @param mem_free             Receives the pointer and the size it was
+ *                             allocated with.
+ * @return 0, or -1 on an invalid configuration (nothing is allocated).
+ */
 CFIBER_EXPORT int multislab_init_ext(multislab_t* ms,
                                      size_t block_size,
                                      uint32_t blocks_per_slab,
@@ -68,8 +82,9 @@ CFIBER_EXPORT int multislab_init_ext(multislab_t* ms,
                                      uint32_t hysteresis_threshold,
                                      void* (*mem_alloc)(size_t, void*),
                                      void (*mem_free)(void*, size_t, void*),
-                                     void* mem_ctx);
+                                     void* mem_ctx) __attribute__((nonnull(1)));
 
+/** @brief multislab_init_ext() over a cache-line-aligned heap allocator. */
 CFIBER_EXPORT int multislab_init(multislab_t* ms,
                                  size_t block_size,
                                  uint32_t blocks_per_slab,

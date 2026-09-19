@@ -56,7 +56,9 @@ CFIBER_EXPORT int growable_stack_allocator_destroy(growable_stack_allocator_t* a
 /**
  * @brief Release a growable stack back to the pool.
  * @details The stack is recycled (physical pages released but VMA kept)
- *          and placed back in the cache if space is available.
+ *          and placed back in the cache if space is available. A stack that
+ *          did not come from this pool (its size differs) asserts in debug
+ *          builds; in release it is unmapped rather than pooled.
  * @param alloc The allocator to use.
  * @param stack The stack to release.
  */

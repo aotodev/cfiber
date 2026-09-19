@@ -13,8 +13,10 @@ contiguous region into `block_count` blocks of `block_size` and tracks
 occupancy in a bitmap, so allocation and release are a scan and a bit flip with
 no per-block header and no free-list pointer stealing space from the payload.
 
-`block_size` must be a multiple of `CACHE_LINE_SIZE`, which is also what keeps
-two fibers' stacks off the same line. The bitmap is `BITMAP_SIZE` words, capping
+`block_size` must be a multiple of `CACHE_LINE_SIZE`, and the region must be
+aligned to at least `alignof(max_align_t)`; blocks inherit the region's
+alignment, so a cache-line-aligned region keeps two fibers' stacks off the same
+line. The bitmap is `BITMAP_SIZE` words (`CFIBER_BITMAP_SIZE` in CMake), capping
 one slab at `MAX_BLOCK_COUNT` blocks; the multislab exists to get past that cap.
 
 The slab owns no memory. It is the right layer when the region is a static
@@ -44,8 +46,15 @@ allocator.
 
 The backing allocator is the `(alloc, free, ctx)` triple: every slab's memory
 comes from it, and the free callback is handed the size back so a user allocator
-does not need to record block sizes. This is the hook the scheduler exposes as
-`cfiber_scheduler_init_ext()`; see [freestanding.md](freestanding.md).
+does not need to record block sizes. It must return memory aligned to at least
+`alignof(max_align_t)`; the default one returns cache-line-aligned memory. This
+is the hook the scheduler exposes as `cfiber_scheduler_init_ext()`; see
+[freestanding.md](freestanding.md).
+
+Every stack allocator fills a `cstack_t` whose `usable_base` marks where the
+fiber's stack starts: above the guard page of a growable stack, above the ASan
+redzone of a fixed-size one. Schedulers hand `init_fiber()` and the sanitizers
+the usable range, never `mem_base`.
 
 ## Fixed-size stacks
 

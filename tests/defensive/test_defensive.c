@@ -53,6 +53,10 @@ static int test_slab_init_rejects_bad_params(void) {
     ASSERT_TRUE(slab_init(&s, BLOCK, mem, BLOCK - 1) == -1);
     /* more blocks than the bitmap can track (no user memory is touched here) */
     ASSERT_TRUE(slab_init(&s, BLOCK, mem, (size_t)BLOCK * (MAX_BLOCK_COUNT + 1)) == -1);
+    /* a block count that wraps a 32-bit narrowing must still be rejected */
+    ASSERT_TRUE(slab_init(&s, BLOCK, mem, (size_t)BLOCK << 32) == -1);
+    /* memory below max_align_t alignment: the canary store would be UB */
+    ASSERT_TRUE(slab_init(&s, BLOCK, mem + 1, sizeof(mem) - BLOCK) == -1);
 
     /* a valid configuration still succeeds */
     ASSERT_EQ_U32(slab_init(&s, BLOCK, mem, sizeof(mem)), 0);
@@ -179,6 +183,28 @@ static int test_growable_create_rejects_bad_args(void) {
     return 0;
 }
 
+/* A stack that did not come from the pool is unmapped, not pooled: pooling it
+ * would hand out a stack of the wrong size later. */
+static int test_growable_release_foreign_stack_not_pooled(void) {
+    const size_t ps = page_size();
+    growable_stack_allocator_t* alloc = growable_stack_allocator_create(
+        (growable_stack_allocator_args_t){.max_stack_size = ps * 4, .cache_capacity = 2, .initial_cached = 0});
+    ASSERT_NOT_NULL(alloc);
+
+    cstack_t foreign = cstack_growable_create(ps * 8);
+    ASSERT_TRUE(is_valid_cstack(&foreign));
+    growable_stack_release(alloc, &foreign); /* wrong size: destroyed */
+    ASSERT_NULL(foreign.mem_base);
+
+    /* the pool hands out its own size, and nothing was counted as outstanding */
+    cstack_t own = growable_stack_alloc(alloc);
+    ASSERT_TRUE(is_valid_cstack(&own));
+    ASSERT_EQ_U64(own.total_size, ps * 5);
+    growable_stack_release(alloc, &own);
+    ASSERT_EQ_U32((uint32_t)growable_stack_allocator_destroy(alloc), 0);
+    return 0;
+}
+
 static int test_growable_destroy_reports_leak(void) {
     const size_t ps = page_size();
     growable_stack_allocator_t* alloc = growable_stack_allocator_create(
@@ -206,6 +232,7 @@ int main(void) {
     RUN_TEST(test_multislab_foreign_release_is_noop);
     RUN_TEST(test_multislab_double_release_keeps_live_slab);
     RUN_TEST(test_growable_create_rejects_bad_args);
+    RUN_TEST(test_growable_release_foreign_stack_not_pooled);
     RUN_TEST(test_growable_destroy_reports_leak);
 
     return cfiber_test_report();

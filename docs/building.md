@@ -56,6 +56,7 @@ that mode.
 | `CFIBER_STACK_SANITIZER`            | `OFF`   | Enable canary + watermark instrumentation                    |
 | `CFIBER_ASAN`                       | `OFF`   | Build with AddressSanitizer + fiber-aware instrumentation (hosted only; excludes `CFIBER_STACK_SANITIZER`) |
 | `CFIBER_ASAN_REDZONE`               | -       | Guard size in bytes below each fiber stack (default: one cache line). Only used with `CFIBER_ASAN` |
+| `CFIBER_BITMAP_SIZE`                | `8`     | Bitmap words per slab, so the per-slab block cap. Layout-affecting: propagated to consumers as a PUBLIC define |
 | `CFIBER_UBSAN`                      | `OFF`   | Build with UndefinedBehaviorSanitizer; aborts on the first finding (hosted only; combinable with `CFIBER_ASAN`) |
 | `CFIBER_TSAN`                       | `OFF`   | Build with ThreadSanitizer for the reactor's concurrency (hosted x86_64; excludes `CFIBER_ASAN`/`CFIBER_FUZZ`) |
 | `CFIBER_FUZZ`                       | `OFF`   | Build the libFuzzer targets under ASan + UBSan (Clang + hosted only)        |

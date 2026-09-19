@@ -340,7 +340,7 @@ static void enter_fiber(cfiber_reactor_t* s, ev_fiber_t* f) {
     s->current = f;
     f->state = FB_RUNNING;
     cfiber_tsan_switch_to(f->tsan);
-    cfiber_asan_switch(&s->loop_ctx, &f->fiber.ctx, f->stack.mem_base, f->stack.total_size, false);
+    cfiber_asan_switch(&s->loop_ctx, &f->fiber.ctx, f->stack.usable_base, cstack_usable_size(&f->stack), false);
     /* control returns here when f yields, parks, or completes */
 }
 
@@ -943,8 +943,8 @@ static bool spawn_locked(cfiber_reactor_t* s, cfiber_reactor_fn fn, void* arg, c
         return false;
     }
 
-    f->fiber.stack = (uint8_t*)f->stack.mem_base;
-    f->fiber.stack_size = f->stack.total_size;
+    f->fiber.stack = f->stack.usable_base; /* above the guard page */
+    f->fiber.stack_size = cstack_usable_size(&f->stack);
     f->reg_fd = -1;
     f->wait_fd = -1;
     f->timer_i = NO_TIMER;

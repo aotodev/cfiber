@@ -3,9 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Cache-line aligned so blocks, whose size is a multiple of the line, never
+ * share one. aligned_alloc needs the size rounded up to the alignment. */
 static void* default_alloc(const size_t size, void* ctx) {
     (void)ctx;
-    return malloc(size);
+    return aligned_alloc(CACHE_LINE_SIZE, align_up(size, CACHE_LINE_SIZE));
 }
 
 static void default_free(void* const ptr, size_t size, void* ctx) {
@@ -105,7 +107,8 @@ int multislab_init_ext(multislab_t* const ms,
                        void* (*mem_alloc)(size_t, void*),
                        void (*mem_free)(void*, size_t, void*),
                        void* mem_ctx) {
-    if (block_size < CACHE_LINE_SIZE || blocks_per_slab == 0 || blocks_per_slab > MAX_BLOCK_COUNT) {
+    if (block_size < CACHE_LINE_SIZE || (block_size % CACHE_LINE_SIZE) || blocks_per_slab == 0
+        || blocks_per_slab > MAX_BLOCK_COUNT || blocks_per_slab > SIZE_MAX / block_size || !mem_alloc || !mem_free) {
         return -1;
     }
 

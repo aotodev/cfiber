@@ -14,6 +14,7 @@ int ms_stack_alloc(cstack_t* stack, multislab_t* ms) {
     }
 
     stack->mem_base = mem;
+    stack->usable_base = (char*)mem + CFIBER_ASAN_REDZONE;
     stack->stack_top = (char*)mem + ms->block_size;
     stack->total_size = ms->block_size;
 

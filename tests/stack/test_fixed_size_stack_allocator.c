@@ -12,6 +12,7 @@
  * instrumentation is compiled in.
  */
 
+#include "cfiber/debug/asan.h"
 #include "cfiber/memory/multislab_alloc.h"
 #include "cfiber/stack/fixed_size_stack_allocator.h"
 #include "cfiber/stack/stack.h"
@@ -57,6 +58,9 @@ static int test_ms_stack_alloc_fills_descriptor(void) {
     ASSERT_TRUE(is_valid_cstack(&s));
     ASSERT_EQ_U64(s.total_size, SBLOCK);
     ASSERT_EQ_PTR(s.stack_top, (char*)s.mem_base + SBLOCK);
+    /* the fiber's stack starts above the (possibly empty) ASan redzone */
+    ASSERT_EQ_PTR(s.usable_base, (char*)s.mem_base + CFIBER_ASAN_REDZONE);
+    ASSERT_EQ_U64(cstack_usable_size(&s), SBLOCK - CFIBER_ASAN_REDZONE);
 
     ms_stack_release(&s, &ms);
     multislab_destroy(&ms);
