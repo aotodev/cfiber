@@ -8,9 +8,10 @@ LABEL org.opencontainers.image.source=https://github.com/aotodev/cfiber
 # aarch64-linux-gnu-glibc: ld-linux-aarch64.so.1, needed to link the AArch64 tests
 #   and for `qemu-aarch64 -L` to run them.
 # make: make.sh configures with -G "Unix Makefiles"; ninja is only for the fuzz job.
+# pkgconf: the ctest job checks the installed cfiber.pc with a real pkg-config.
 RUN pacman -Syu --noconfirm \
         clang llvm gcc \
-        cmake ninja make \
+        cmake ninja make pkgconf \
         git \
         qemu-user qemu-system-arm \
         aarch64-linux-gnu-gcc aarch64-linux-gnu-glibc \
