@@ -29,6 +29,8 @@ switch_context:
 
 #ifdef __ARM_FP
     vstmia r0!, {s16-s31}
+    vmrs r2, fpscr
+    str r2, [r0], #4
 #endif
 
     # -------------------------------------
@@ -49,6 +51,8 @@ switch_context:
 
 #ifdef __ARM_FP
     vldmia r1!, {s16-s31}
+    ldr r2, [r1], #4
+    vmsr fpscr, r2
 #endif
 
     # return

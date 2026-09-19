@@ -79,6 +79,13 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
     fiber->ctx.rbx = (uint64_t)func;
     fiber->ctx.r12 = (uint64_t)user_data;
 
+    /* A new fiber inherits the creator's FP control state, as a new thread
+     * would. Zero would unmask every exception. */
+    __asm__ volatile("stmxcsr %0"
+                     : "=m"(fiber->ctx.mxcsr));
+    __asm__ volatile("fnstcw %0"
+                     : "=m"(fiber->ctx.x87_cw));
+
     /* Arrange for the first ret to jump into fiber_prologue. */
     stack_ptr -= 8;
     *(uint64_t*)stack_ptr = (uint64_t)fiber_prologue;
@@ -100,6 +107,10 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
     /* Link register points to the fiber startup routine. */
     fiber->ctx.x30 = (uint64_t)&fiber_prologue;
 
+    /* A new fiber inherits the creator's FP control state. */
+    __asm__ volatile("mrs %0, fpcr"
+                     : "=r"(fiber->ctx.fpcr));
+
 #elifdef __arm__
     /* Align to an 8-byte boundary per AAPCS ABI. */
     uint8_t* stack_ptr = (uint8_t*)(stack_top & ~7U);
@@ -111,5 +122,11 @@ void init_fiber(fiber_t* const fiber, fiber_fn const func, void* const user_data
     fiber->ctx.r5 = (uint32_t)user_data;
 
     fiber->ctx.lr = (uint32_t)&fiber_prologue;
+
+#ifdef __ARM_FP
+    /* A new fiber inherits the creator's FP control state. */
+    __asm__ volatile("vmrs %0, fpscr"
+                     : "=r"(fiber->ctx.fpscr));
+#endif
 #endif
 }
