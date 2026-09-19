@@ -25,3 +25,5 @@ switch_context:
     ret
 
 .size switch_context, .-switch_context
+
+.section .note.GNU-stack, "", @progbits

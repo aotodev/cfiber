@@ -4,7 +4,7 @@
 
 fiber_prologue:
     # x20 = user_data, x19 = user_func (set in init_fiber)
-#if defined(__SANITIZE_ADDRESS__)
+#if CFIBER_ASAN_ENABLED
     // Issue the finish_switch_fiber that pairs with the scheduler's
     // start_switch_fiber when entering this fresh stack. x19/x20 are
     // callee-saved and survive the call; the incoming lr is unused (the
@@ -17,3 +17,5 @@ fiber_prologue:
     brk     #0                  // should not reach
 
 .size fiber_prologue, .-fiber_prologue
+
+.section .note.GNU-stack, "", %progbits

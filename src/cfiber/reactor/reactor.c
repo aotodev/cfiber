@@ -31,6 +31,7 @@
 
 #include "cfiber/core/macros.h"
 #include "cfiber/debug/asan.h"
+#include "cfiber/debug/tsan.h"
 #include "cfiber/fiber/context.h"
 #include "cfiber/fiber/fiber.h"
 #include "cfiber/memory/multislab_alloc.h"
@@ -88,6 +89,7 @@ struct cfiber_reactor_fiber {
     struct cfiber_reactor_fiber* live_prev;
 
     fiber_state_t state;
+    void* tsan;          /* ThreadSanitizer context, NULL without TSan */
     uint64_t generation; /* bumped on recycle; matches handle.gen. 64-bit so it
                           * cannot wrap within the reactor's lifetime, even under
                           * sustained high-churn reuse of a single block. */
@@ -132,6 +134,7 @@ struct cfiber_reactor {
     int evfd; /* eventfd: cross-thread wakeup of the loop */
 
     context_t loop_ctx; /* the run loop's own (host) context */
+    void* loop_tsan;    /* TSan context of the stack running the loop */
     ev_fiber_t* current;
     ev_fiber_t* zombie;
 
@@ -302,6 +305,7 @@ static void timer_remove(cfiber_reactor_t* s, ev_fiber_t* f) {
 static void enter_fiber(cfiber_reactor_t* s, ev_fiber_t* f) {
     s->current = f;
     f->state = FB_RUNNING;
+    cfiber_tsan_switch_to(f->tsan);
     cfiber_asan_switch(&s->loop_ctx, &f->fiber.ctx, f->stack.mem_base, f->stack.total_size, false);
     /* control returns here when f yields, parks, or completes */
 }
@@ -310,6 +314,7 @@ static void leave_to_loop(cfiber_reactor_t* s, ev_fiber_t* from, bool finishing)
     const void* hlow;
     size_t hsz;
     cfiber_asan_host_bounds(&hlow, &hsz);
+    cfiber_tsan_switch_to(s->loop_tsan);
     cfiber_asan_switch(&from->fiber.ctx, &s->loop_ctx, hlow, hsz, finishing);
 }
 
@@ -713,6 +718,7 @@ static void fiber_recycle(cfiber_reactor_t* s, ev_fiber_t* f) {
     detach_fd(s, f); /* a registration left by the last wait */
     live_unlink(s, f);
     growable_stack_release(s->stacks, &f->stack);
+    cfiber_tsan_destroy(f->tsan);
     fiber_repool(s, f);
 }
 
@@ -853,6 +859,7 @@ static bool spawn_locked(cfiber_reactor_t* s, cfiber_reactor_fn fn, void* arg, c
     memset(&f->fiber.ctx, 0, sizeof(context_t));
 
     init_fiber(&f->fiber, (fiber_fn)fn, arg);
+    f->tsan = cfiber_tsan_create();
     live_link(s, f);
     enqueue(s, f);
     s->active++;
@@ -963,6 +970,8 @@ int cfiber_reactor_run(cfiber_reactor_t* r) {
     g_reactor = s;
     cfiber_return_hook_t prev_hook = cfiber_set_return_hook(reactor_return_hook, s);
     const cfiber_asan_host_t prev_host = cfiber_asan_host_begin();
+    void* const prev_loop_tsan = s->loop_tsan;
+    s->loop_tsan = cfiber_tsan_current(); /* a nested run's host is the outer fiber */
 
     struct epoll_event evs[64];
     int rc = 0;
@@ -1019,6 +1028,7 @@ int cfiber_reactor_run(cfiber_reactor_t* r) {
         fire_expired_timers(s);
     }
 
+    s->loop_tsan = prev_loop_tsan;
     cfiber_asan_host_end(prev_host);
     cfiber_set_return_hook(prev_hook.fn, prev_hook.ctx);
     g_reactor = prev_reactor;
@@ -1134,6 +1144,7 @@ void cfiber_reactor_destroy(cfiber_reactor_t* r) {
      * stacks are released here rather than leaked. */
     for (ev_fiber_t* f = s->live_head; f; f = f->live_next) {
         growable_stack_release(s->stacks, &f->stack);
+        cfiber_tsan_destroy(f->tsan);
     }
     s->live_head = nullptr;
 
