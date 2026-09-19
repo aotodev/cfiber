@@ -77,6 +77,10 @@ typedef enum {
     FB_ZOMBIE,   /* completed, awaiting stack release        */
 } fiber_state_t;
 
+/* What a parked fiber waits for. A wake resumes only an async park; cancel and
+ * the fd/timer sources resume their own. */
+typedef enum { PARK_FD, PARK_TIMER, PARK_ASYNC } park_kind_t;
+
 struct cfiber_reactor_fiber {
     fiber_t fiber;  /* cfiber context + stack pointer/size        */
     cstack_t stack; /* backing growable stack (mmap + guard page) */
@@ -89,6 +93,9 @@ struct cfiber_reactor_fiber {
     struct cfiber_reactor_fiber* live_prev;
 
     fiber_state_t state;
+    park_kind_t park;    /* valid while FB_PARKED */
+    bool wake_pending;   /* a wake arrived outside an async park; the next
+                          * cfiber_ev_wait_async returns at once */
     void* tsan;          /* ThreadSanitizer context, NULL without TSan */
     uint64_t generation; /* bumped on recycle; matches handle.gen. 64-bit so it
                           * cannot wrap within the reactor's lifetime, even under
@@ -123,15 +130,19 @@ typedef struct {
 } cmd_cell_t;
 
 typedef struct {
+    /* Producer and consumer cursors on their own cache lines; cells and mask
+     * are read-only after init, so sharing the producer line costs nothing. */
+    _Alignas(CACHE_LINE_SIZE) _Atomic size_t enqueue_pos;
     cmd_cell_t* cells;
     size_t mask; /* capacity - 1 (capacity is a power of two) */
-    _Alignas(64) _Atomic size_t enqueue_pos;
-    _Alignas(64) _Atomic size_t dequeue_pos;
+    _Alignas(CACHE_LINE_SIZE) _Atomic size_t dequeue_pos;
 } cmd_ring_t;
 
 struct cfiber_reactor {
-    int epfd;
-    int evfd; /* eventfd: cross-thread wakeup of the loop */
+    /* Lock-free cross-thread command ring. A wake/cancel issued from the loop
+     * thread itself (detected via the thread-local g_reactor) is applied
+     * directly instead of being routed through the ring + eventfd. */
+    cmd_ring_t cmds;
 
     context_t loop_ctx; /* the run loop's own (host) context */
     void* loop_tsan;    /* TSan context of the stack running the loop */
@@ -162,11 +173,8 @@ struct cfiber_reactor {
     ev_fiber_t** fd_owner;
     size_t fd_owner_cap;
 
-    /* Lock-free cross-thread command ring. A wake/cancel issued from the loop
-     * thread itself (detected via the thread-local g_reactor) is applied
-     * directly instead of being routed through the ring + eventfd. */
-    cmd_ring_t cmds;
-
+    int epfd;
+    int evfd;    /* eventfd: cross-thread wakeup of the loop */
     int active;  /* live fibers: ready + running + parked */
     int blocked; /* parked fibers */
 };
@@ -182,6 +190,32 @@ static uint64_t now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ((uint64_t)ts.tv_sec * 1000000000ULL) + (uint64_t)ts.tv_nsec;
+}
+
+/* Absolute deadline for a relative timeout. Saturates instead of wrapping;
+ * UINT64_MAX is a deadline that never comes. */
+#define NO_DEADLINE UINT64_MAX
+
+static uint64_t deadline_after(uint64_t ns) {
+    const uint64_t now = now_ns();
+    return ns > NO_DEADLINE - now ? NO_DEADLINE : now + ns;
+}
+
+static uint64_t deadline_after_opt(int64_t timeout_ns) {
+    return timeout_ns < 0 ? NO_DEADLINE : deadline_after((uint64_t)timeout_ns);
+}
+
+/* Time left to a deadline, in cfiber_ev_wait's timeout convention. */
+static int64_t remaining_ns(uint64_t deadline) {
+    if (deadline == NO_DEADLINE) {
+        return -1;
+    }
+    const uint64_t now = now_ns();
+    if (deadline <= now) {
+        return 0;
+    }
+    const uint64_t left = deadline - now;
+    return left > (uint64_t)INT64_MAX ? INT64_MAX : (int64_t)left;
 }
 
 /* ============================================================================
@@ -445,9 +479,18 @@ static void unpark(cfiber_reactor_t* s, ev_fiber_t* f, cfiber_ev_status_t status
     resume(s, f, status);
 }
 
+/* The fiber calling an in-fiber API, or NULL off the loop thread: asserts in
+ * debug builds, lets the caller fail with EINVAL in release. */
+static ev_fiber_t* running_fiber(void) {
+    cfiber_reactor_t* s = g_reactor;
+    ASSERT(s && s->current && "in-fiber reactor API used outside a reactor fiber");
+    return s ? s->current : nullptr;
+}
+
 /* Park the current fiber and switch to the loop. Returns the delivered status. */
-static cfiber_ev_status_t park_current(cfiber_reactor_t* s) {
+static cfiber_ev_status_t park_current(cfiber_reactor_t* s, park_kind_t kind) {
     ev_fiber_t* f = s->current;
+    f->park = kind;
     f->state = FB_PARKED;
     f->wait_status = CFIBER_EV_READY;
     s->blocked++;
@@ -461,16 +504,19 @@ static cfiber_ev_status_t park_current(cfiber_reactor_t* s) {
  * ============================================================================ */
 
 cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns) {
+    ev_fiber_t* f = running_fiber();
+    if (UNLIKELY(!f)) {
+        errno = EINVAL;
+        return CFIBER_EV_ERROR;
+    }
     cfiber_reactor_t* s = g_reactor;
-    ASSERT(s && s->current && "cfiber_ev_wait outside a reactor fiber");
-    ev_fiber_t* f = s->current;
 
     if (arm_fd(s, f, fd, direction) < 0) {
         return CFIBER_EV_ERROR;
     }
 
     if (timeout_ns >= 0) {
-        if (!timer_add(s, f, now_ns() + (uint64_t)timeout_ns)) {
+        if (!timer_add(s, f, deadline_after((uint64_t)timeout_ns))) {
             detach_fd(s, f);
             errno = ENOMEM;
             return CFIBER_EV_ERROR;
@@ -478,7 +524,7 @@ cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns
     }
 
     f->wait_fd = fd;
-    cfiber_ev_status_t st = park_current(s);
+    cfiber_ev_status_t st = park_current(s, PARK_FD);
     f->wait_fd = -1;
     /* Ready: the one-shot is disarmed, the registration stays for the next
      * wait. Timeout/cancel: the loop already detached the fd. */
@@ -486,38 +532,51 @@ cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns
 }
 
 cfiber_ev_status_t cfiber_ev_sleep(uint64_t ns) {
+    ev_fiber_t* f = running_fiber();
+    if (UNLIKELY(!f)) {
+        errno = EINVAL;
+        return CFIBER_EV_ERROR;
+    }
     cfiber_reactor_t* s = g_reactor;
-    ASSERT(s && s->current && "cfiber_ev_sleep outside a reactor fiber");
-    ev_fiber_t* f = s->current;
 
-    if (!timer_add(s, f, now_ns() + ns)) {
+    if (!timer_add(s, f, deadline_after(ns))) {
         errno = ENOMEM;
         return CFIBER_EV_ERROR;
     }
-    return park_current(s);
+    return park_current(s, PARK_TIMER);
 }
 
 cfiber_ev_status_t cfiber_ev_wait_async(int64_t timeout_ns) {
+    ev_fiber_t* f = running_fiber();
+    if (UNLIKELY(!f)) {
+        errno = EINVAL;
+        return CFIBER_EV_ERROR;
+    }
     cfiber_reactor_t* s = g_reactor;
-    ASSERT(s && s->current && "cfiber_ev_wait_async outside a reactor fiber");
-    ev_fiber_t* f = s->current;
+
+    if (f->wake_pending) {
+        f->wake_pending = false; /* woken before parking: consume the permit */
+        return CFIBER_EV_READY;
+    }
 
     if (timeout_ns >= 0) {
-        if (!timer_add(s, f, now_ns() + (uint64_t)timeout_ns)) {
+        if (!timer_add(s, f, deadline_after((uint64_t)timeout_ns))) {
             errno = ENOMEM;
             return CFIBER_EV_ERROR;
         }
     }
-    return park_current(s);
+    return park_current(s, PARK_ASYNC);
 }
 
 /* Always returns to the loop, even with nothing else ready: the loop polls
  * between rounds, so timers, I/O and cross-thread commands progress inside a
  * yield loop. */
 void cfiber_ev_yield(void) {
+    ev_fiber_t* cur = running_fiber();
+    if (UNLIKELY(!cur)) {
+        return;
+    }
     cfiber_reactor_t* s = g_reactor;
-    ASSERT(s && s->current && "cfiber_ev_yield outside a reactor fiber");
-    ev_fiber_t* cur = s->current;
 
     s->current = nullptr;
     enqueue(s, cur);
@@ -538,7 +597,9 @@ static int wait_failed(cfiber_ev_status_t st) {
     return -1; /* CFIBER_EV_ERROR leaves errno from epoll_ctl */
 }
 
+/* timeout_ns is a total deadline for the whole call, not per retry. */
 static ssize_t read_impl(int fd, void* buf, size_t n, int64_t timeout_ns) {
+    const uint64_t deadline = deadline_after_opt(timeout_ns);
     for (;;) {
         ssize_t r = read(fd, buf, n);
         if (r >= 0) {
@@ -548,7 +609,7 @@ static ssize_t read_impl(int fd, void* buf, size_t n, int64_t timeout_ns) {
             continue;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            cfiber_ev_status_t st = cfiber_ev_wait(fd, EPOLLIN, timeout_ns);
+            cfiber_ev_status_t st = cfiber_ev_wait(fd, EPOLLIN, remaining_ns(deadline));
             if (st == CFIBER_EV_READY) {
                 continue;
             }
@@ -559,6 +620,7 @@ static ssize_t read_impl(int fd, void* buf, size_t n, int64_t timeout_ns) {
 }
 
 static ssize_t write_impl(int fd, const void* buf, size_t n, int64_t timeout_ns) {
+    const uint64_t deadline = deadline_after_opt(timeout_ns);
     size_t off = 0;
     while (off < n) {
         ssize_t w = write(fd, (const char*)buf + off, n - off);
@@ -566,11 +628,15 @@ static ssize_t write_impl(int fd, const void* buf, size_t n, int64_t timeout_ns)
             off += (size_t)w;
             continue;
         }
-        if (w < 0 && errno == EINTR) {
+        if (w == 0) {
+            errno = EIO; /* no progress on a non-empty write: not a valid stream state */
+            return -1;
+        }
+        if (errno == EINTR) {
             continue;
         }
-        if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            cfiber_ev_status_t st = cfiber_ev_wait(fd, EPOLLOUT, timeout_ns);
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            cfiber_ev_status_t st = cfiber_ev_wait(fd, EPOLLOUT, remaining_ns(deadline));
             if (st == CFIBER_EV_READY) {
                 continue;
             }
@@ -652,6 +718,10 @@ int cfiber_ev_set_nonblocking(int fd) {
 int cfiber_ev_close(int fd) {
     cfiber_reactor_t* s = g_reactor;
     ASSERT(s && "cfiber_ev_close outside a reactor");
+    if (UNLIKELY(!s)) {
+        errno = EINVAL;
+        return -1;
+    }
 
     ev_fiber_t* holder = fd_owner_get(s, fd);
     if (holder) {
@@ -800,10 +870,23 @@ static bool ring_dequeue(cmd_ring_t* r, cmd_t* out) {
  * (address-stable) so the read is valid, and the generation reveals recycling. */
 static void apply_cmd(cfiber_reactor_t* s, cmd_t c) {
     ev_fiber_t* f = c.target;
-    if (f->generation != c.gen || f->state != FB_PARKED) {
-        return; /* fiber completed / was recycled / not parked: no-op */
+    if (!f || f->generation != c.gen || f->state == FB_FREE || f->state == FB_ZOMBIE) {
+        return; /* stale handle: fiber completed or was recycled */
     }
-    unpark(s, f, c.kind == CMD_WAKE ? CFIBER_EV_READY : CFIBER_EV_CANCELLED);
+    if (c.kind == CMD_CANCEL) {
+        if (f->state == FB_PARKED) {
+            unpark(s, f, CFIBER_EV_CANCELLED);
+        }
+        return;
+    }
+    /* Wake resumes an async park only. Anywhere else (running, ready, parked
+     * on an fd or timer) it is kept as a permit for the next wait_async, so a
+     * wake that races the park is neither lost nor delivered to the wrong wait. */
+    if (f->state == FB_PARKED && f->park == PARK_ASYNC) {
+        unpark(s, f, CFIBER_EV_READY);
+    } else {
+        f->wake_pending = true;
+    }
 }
 
 /* Post a command from another thread: enqueue, then poke the eventfd to break
@@ -878,13 +961,19 @@ bool cfiber_reactor_spawn(cfiber_reactor_t* r, cfiber_reactor_fn fn, void* arg, 
 bool cfiber_ev_spawn(cfiber_reactor_fn fn, void* arg, cfiber_reactor_handle_t* out_handle) {
     cfiber_reactor_t* s = g_reactor;
     ASSERT(s && "cfiber_ev_spawn outside a reactor");
+    if (UNLIKELY(!s)) {
+        errno = EINVAL;
+        return false;
+    }
     return spawn_locked(s, fn, arg, out_handle);
 }
 
 cfiber_reactor_handle_t cfiber_ev_self(void) {
-    cfiber_reactor_t* s = g_reactor;
-    ASSERT(s && s->current && "cfiber_ev_self outside a reactor fiber");
-    return (cfiber_reactor_handle_t){.f = s->current, .gen = s->current->generation};
+    ev_fiber_t* f = running_fiber();
+    if (UNLIKELY(!f)) {
+        return (cfiber_reactor_handle_t){.f = nullptr, .gen = 0}; /* stale by construction */
+    }
+    return (cfiber_reactor_handle_t){.f = f, .gen = f->generation};
 }
 
 /* ============================================================================
@@ -920,13 +1009,17 @@ bool cfiber_reactor_cancel(cfiber_reactor_t* r, cfiber_reactor_handle_t h) {
 void cfiber_ev_wake(cfiber_reactor_handle_t h) {
     cfiber_reactor_t* s = g_reactor;
     ASSERT(s && "cfiber_ev_wake outside a reactor");
-    apply_cmd(s, (cmd_t){.kind = CMD_WAKE, .target = h.f, .gen = h.gen});
+    if (LIKELY(s)) {
+        apply_cmd(s, (cmd_t){.kind = CMD_WAKE, .target = h.f, .gen = h.gen});
+    }
 }
 
 void cfiber_ev_cancel(cfiber_reactor_handle_t h) {
     cfiber_reactor_t* s = g_reactor;
     ASSERT(s && "cfiber_ev_cancel outside a reactor");
-    apply_cmd(s, (cmd_t){.kind = CMD_CANCEL, .target = h.f, .gen = h.gen});
+    if (LIKELY(s)) {
+        apply_cmd(s, (cmd_t){.kind = CMD_CANCEL, .target = h.f, .gen = h.gen});
+    }
 }
 
 /* ============================================================================
@@ -943,8 +1036,11 @@ static int next_timeout_ms(cfiber_reactor_t* s) {
     if (deadline <= now) {
         return 0;
     }
-    uint64_t ms = (deadline - now + 999999ULL) / 1000000ULL; /* round up */
-    return ms > (uint64_t)INT32_MAX ? INT32_MAX : (int)ms;
+    const uint64_t left = deadline - now;
+    if (left >= (uint64_t)INT32_MAX * 1000000ULL) {
+        return INT32_MAX; /* also keeps the round-up below from overflowing */
+    }
+    return (int)((left + 999999ULL) / 1000000ULL); /* round up */
 }
 
 static void fire_expired_timers(cfiber_reactor_t* s) {
