@@ -1,6 +1,5 @@
 ---
-# .clang-format file for C with BSD-like style
-# Curly braces on same column as function declaration
+# .clang-format for the C sources: LLVM base, 4-space indent, braces attached.
 
 # Base style
 BasedOnStyle: LLVM
@@ -8,9 +7,9 @@ BasedOnStyle: LLVM
 # Language specific settings (Cpp covers C language)
 Language: Cpp
 
-# Brace settings - BSD style (Allman)
+# Brace settings
 BreakBeforeBraces: Attach
-AlwaysBreakAfterReturnType: None
+BreakAfterReturnType: None
 
 # Indentation
 IndentWidth: 4
@@ -29,8 +28,7 @@ AllowShortBlocksOnASingleLine: Never
 # Spacing
 SpaceAfterCStyleCast: false
 SpaceBeforeParens: ControlStatements
-SpaceInEmptyParentheses: false
-SpacesInParentheses: false
+SpacesInParens: Never
 SpacesInSquareBrackets: false
 SpaceBeforeAssignmentOperators: true
 
