@@ -69,28 +69,38 @@ guard pages. Header:
 [include/cfiber/stack/debug/stack_sanitize.h](../include/cfiber/stack/debug/stack_sanitize.h).
 
 - **Canary**: a known 64-bit word is written at the very bottom of each stack on
-  allocation and checked on release. A changed canary means the fiber overflowed
-  its stack at some point during its life.
+  allocation and checked on release, in every build type. A changed canary
+  means the fiber overflowed its stack at some point during its life.
 - **Watermark**: the rest of the stack is painted `0xA5` on allocation. On
   release, scanning up from the bottom to the first byte that is no longer
   `0xA5` gives the peak usage the fiber actually reached.
   `cstack_debug_stack_used_bytes()` returns `(size_t)-1` when the canary is
   already corrupt, since the measurement is meaningless once the stack has
-  overflowed.
+  overflowed. A fiber that legitimately writes `0xA5` at its deepest point
+  under-reports by that much.
+
+A stack counts as overflowed (`cstack_debug_stack_overflowed()`) when the canary
+is gone or the watermark is used down to the canary: a large frame or an indexed
+write can step clean over one word, and a stack used to its last byte has
+nothing left to catch that.
 
 The watermark is the more useful of the two in practice. On a target where stack
 size is fixed at configure time and there is no MMU to catch a mistake, it turns
 stack sizing from a guess into a measurement: run the worst-case workload, read
 the peak, add headroom.
 
-Both hook into the fixed-size stack allocator, so any code that allocates
-through `ms_stack_alloc()` (the built-in scheduler included) is covered without
-changes at the call site.
+Both hook into the fixed-size stack allocator: `ms_stack_alloc()` plants and
+paints, `ms_stack_release()` checks and returns `false` on overflow. The
+built-in scheduler allocates every fiber stack through them, traps when a freed
+fiber overflowed (neighbouring stacks in the slab may already be corrupt), and
+accumulates the peak in `cfiber_scheduler_stack_peak()`.
 
 ```bash
 ./utils/make.sh -t -e --sanitizer                     # native
 ./utils/make.sh --arch=arm --cpu=cortex-m4 -t --sanitizer
 ```
+
+CI runs the sanitizer suites natively and on Cortex-M0 and M3 under QEMU.
 
 ## UndefinedBehaviorSanitizer
 

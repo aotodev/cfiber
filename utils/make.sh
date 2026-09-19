@@ -412,7 +412,7 @@ if [[ "${build_tests:-OFF}" == ON ]]; then
         ok "defensive tests finished"
     fi
 
-    if [[ "${stack_sanitizer:-OFF}" == ON && "${target_arch}" != "arm" ]]; then
+    if [[ "${stack_sanitizer:-OFF}" == ON ]]; then
         section "running stack sanitizer tests"
         run_executable "tests/test_stack_sanitizer"
         ok "stack sanitizer tests finished"

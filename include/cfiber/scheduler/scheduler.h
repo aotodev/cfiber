@@ -20,6 +20,7 @@
 #include "cfiber/core/macros.h"
 #include "cfiber/fiber/fiber.h"
 #include "cfiber/memory/multislab_alloc.h"
+#include "cfiber/stack/stack.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -41,6 +42,8 @@ extern "C" {
 typedef struct cfiber_task {
     /** Embedded fiber (context + stack pointer). */
     fiber_t fiber;
+    /** The stack block, as handed out by ms_stack_alloc(). */
+    cstack_t stack;
     /** Next node in the ready queue (or NULL). */
     struct cfiber_task* next;
 } cfiber_task_t;
@@ -71,6 +74,8 @@ typedef struct cfiber_scheduler {
     context_t sched_ctx;
     /** Per-fiber stack size in bytes. */
     size_t stack_size;
+    /** Highest stack usage seen among completed fibers (stack sanitizer only). */
+    size_t stack_peak;
     /** Number of live (ready + running) fibers. */
     uint32_t active_count;
 } cfiber_scheduler_t;
@@ -164,6 +169,15 @@ CFIBER_EXPORT void cfiber_scheduler_run(cfiber_scheduler_t* sched) __attribute__
  * @return The innermost running scheduler, or NULL if none is running.
  */
 CFIBER_EXPORT cfiber_scheduler_t* cfiber_scheduler_current(void);
+
+/**
+ * @brief Peak stack usage, in bytes, over every fiber this scheduler has
+ *        completed so far.
+ * @details Measured by the watermark when CFIBER_STACK_SANITIZER is on; 0
+ *          otherwise. Size stacks from this number plus headroom. A fiber that
+ *          overflowed is not counted: the scheduler traps when it frees it.
+ */
+CFIBER_EXPORT size_t cfiber_scheduler_stack_peak(const cfiber_scheduler_t* sched) __attribute__((nonnull(1)));
 
 /**
  * @brief Yield the current fiber back to the scheduler.

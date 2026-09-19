@@ -1,6 +1,8 @@
 #include "cfiber/scheduler/scheduler.h"
 
 #include "cfiber/debug/asan.h"
+#include "cfiber/stack/debug/stack_sanitize.h"
+#include "cfiber/stack/fixed_size_stack_allocator.h"
 
 #include <string.h>
 
@@ -46,12 +48,17 @@ static inline cfiber_task_t* dequeue_ready(cfiber_scheduler_t* s) {
  * ============================================================================ */
 
 static void task_free(cfiber_scheduler_t* s, cfiber_task_t* t) {
-    /* fiber.stack points just above the poisoned redzone; recover the slab
-     * block base (which the allocator expects) and clear the poison so the
-     * block can be reused. Both are no-ops when ASan is disabled (REDZONE 0). */
-    uint8_t* block = t->fiber.stack - CFIBER_ASAN_REDZONE;
-    cfiber_asan_unpoison(block, CFIBER_ASAN_REDZONE);
-    multislab_release(&s->stack_alloc, block);
+#if CFIBER_STACK_SANITIZER
+    const size_t used = cstack_debug_stack_used_bytes(&t->stack);
+    if (used > s->stack_peak) {
+        s->stack_peak = used;
+    }
+#endif
+    if (UNLIKELY(!ms_stack_release(&t->stack, &s->stack_alloc))) {
+        /* Overflow found by the stack sanitizer: neighbouring blocks may be
+         * corrupt, so stop here in every build. t and t->stack are in scope. */
+        __builtin_trap();
+    }
     multislab_release(&s->task_alloc, t);
 }
 
@@ -155,17 +162,13 @@ bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, fiber_fn func, void* user
         return false;
     }
 
-    uint8_t* block = multislab_alloc(&sched->stack_alloc);
-    if (UNLIKELY(!block)) {
+    if (UNLIKELY(ms_stack_alloc(&task->stack, &sched->stack_alloc))) {
         multislab_release(&sched->task_alloc, task);
         return false;
     }
 
-    /* Poison the redzone at the bottom of the block; the usable stack starts
-     * just above it. No-op / zero offset when ASan is disabled. */
-    cfiber_asan_poison(block, CFIBER_ASAN_REDZONE);
-
-    task->fiber.stack = block + CFIBER_ASAN_REDZONE;
+    /* The usable stack starts above the ASan redzone (zero offset without ASan). */
+    task->fiber.stack = (uint8_t*)task->stack.mem_base + CFIBER_ASAN_REDZONE;
     task->fiber.stack_size = sched->stack_size;
     memset(&task->fiber.ctx, 0, sizeof(context_t));
     task->next = nullptr;
@@ -223,6 +226,10 @@ void cfiber_scheduler_run(cfiber_scheduler_t* sched) {
 
 cfiber_scheduler_t* cfiber_scheduler_current(void) {
     return s_current_sched;
+}
+
+size_t cfiber_scheduler_stack_peak(const cfiber_scheduler_t* sched) {
+    return sched->stack_peak;
 }
 
 void cfiber_yield(void) {

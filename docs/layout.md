@@ -52,9 +52,7 @@ link to, since it is where the declarations and their documentation live.
 Only symbols marked `CFIBER_EXPORT` in the public headers are exported from a
 shared build; everything else is hidden by `-fvisibility=hidden`. The `static
 inline` helpers in `stack/debug/stack_sanitize.h` need no marking, since they
-are compiled into the consumer rather than linked against. A few ordinary
-functions are also unmarked, `ms_stack_alloc()` and `ms_stack_release()` among
-them, which makes them reachable from a static build only.
+are compiled into the consumer rather than linked against.
 
 ## Per-architecture assembly
 

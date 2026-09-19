@@ -54,9 +54,26 @@ static inline size_t cstack_debug_watermark_size(const cstack_t* s) {
 
 #if CFIBER_STACK_SANITIZER
 
+/** @brief Writes the canary and paints the watermark region. */
 CFIBER_EXPORT void cstack_debug_stack_init(const cstack_t* s);
+
+/** @return Non-zero if the canary word is intact. */
 CFIBER_EXPORT int cstack_debug_stack_check_canary(const cstack_t* s);
+
+/**
+ * @return Peak bytes used since init, from the highest byte of the watermark
+ *         region no longer holding the pattern; (size_t)-1 if the canary is
+ *         gone. A fiber that legitimately writes the pattern byte at its
+ *         deepest point under-reports by that much.
+ */
 CFIBER_EXPORT size_t cstack_debug_stack_used_bytes(const cstack_t* s);
+
+/**
+ * @return Non-zero if the stack overflowed: the canary is gone, or the
+ *         watermark is used down to the canary, which a frame stepping past
+ *         a single word would leave intact.
+ */
+CFIBER_EXPORT int cstack_debug_stack_overflowed(const cstack_t* s);
 
 #else
 static inline void cstack_debug_stack_init(const cstack_t* s) {
@@ -69,6 +86,10 @@ static inline int cstack_debug_stack_check_canary(const cstack_t* s) {
 static inline size_t cstack_debug_stack_used_bytes(const cstack_t* s) {
     (void)s;
     return 0u;
+}
+static inline int cstack_debug_stack_overflowed(const cstack_t* s) {
+    (void)s;
+    return 0;
 }
 #endif
 

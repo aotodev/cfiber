@@ -140,10 +140,14 @@ if(CFIBER_REACTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 # ======================================================================================
-# Stack sanitizer tests (hosted-only, requires the canary/watermark sanitizer)
+# Stack sanitizer tests (all targets; needs no OS)
 # ======================================================================================
-if(NOT CFIBER_FREESTANDING AND CFIBER_STACK_SANITIZER)
-    add_executable(test_stack_sanitizer stack/test_stack_sanitizer.c)
+if(CFIBER_STACK_SANITIZER)
+    if(CFIBER_FREESTANDING)
+        add_arm_executable(test_stack_sanitizer stack/test_stack_sanitizer.c)
+    else()
+        add_executable(test_stack_sanitizer stack/test_stack_sanitizer.c)
+    endif()
     target_include_directories(test_stack_sanitizer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(test_stack_sanitizer PRIVATE cfiber cfiber_test project_flags)
 
