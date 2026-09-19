@@ -1,4 +1,5 @@
-# Bare-metal ARM Cortex-M0 build + tests, run under qemu-system-arm.
+# Bare-metal ARM Cortex-M0 build + tests, run under qemu-system-arm. The stack
+# sanitizer job covers the ARMv6-M alignment rules for the canary store.
 name: cortex-m0
 
 on:
@@ -28,7 +29,16 @@ jobs:
     timeout-minutes: 20
     container:
       image: ghcr.io/aotodev/cfiber-ci@sha256:bfce13eaad965b4a0b445f55c5fa1093aa7efb3c6edb1302fd052678e528eb16
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            args: "-t -e --arch=arm --cpu=cortex-m0"
+          - name: stack-sanitizer
+            args: "-t -e -d --arch=arm --cpu=cortex-m0 --sanitizer"
+    name: "cortex-m0 (${{ matrix.name }})"
     steps:
       - uses: actions/checkout@v4
       - name: Build and run tests
-        run: ./utils/make.sh -t -e --arch=arm --cpu=cortex-m0
+        run: ./utils/make.sh ${{ matrix.args }}
