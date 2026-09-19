@@ -952,12 +952,17 @@ static void fire_expired_timers(cfiber_reactor_t* s) {
 
 int cfiber_reactor_run(cfiber_reactor_t* r) {
     cfiber_reactor_t* s = r;
-    if (g_reactor) {
-        errno = EBUSY; /* a reactor is already running on this thread */
+    if (g_reactor == s) {
+        errno = EBUSY; /* re-entered from one of its own fibers */
         return -1;
     }
+
+    /* Saved and restored like the hook: a fiber may run another reactor to
+     * completion and find its own current again afterwards. */
+    cfiber_reactor_t* const prev_reactor = g_reactor;
     g_reactor = s;
     cfiber_return_hook_t prev_hook = cfiber_set_return_hook(reactor_return_hook, s);
+    const cfiber_asan_host_t prev_host = cfiber_asan_host_begin();
 
     struct epoll_event evs[64];
     int rc = 0;
@@ -1014,8 +1019,9 @@ int cfiber_reactor_run(cfiber_reactor_t* r) {
         fire_expired_timers(s);
     }
 
+    cfiber_asan_host_end(prev_host);
     cfiber_set_return_hook(prev_hook.fn, prev_hook.ctx);
-    g_reactor = nullptr;
+    g_reactor = prev_reactor;
     return rc;
 }
 

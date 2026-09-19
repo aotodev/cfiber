@@ -79,4 +79,16 @@ void cfiber_asan_host_bounds(const void** const low, size_t* const size) {
     *size = tl_host_size;
 }
 
+cfiber_asan_host_t cfiber_asan_host_begin(void) {
+    const cfiber_asan_host_t saved = {.low = tl_host_low, .size = tl_host_size, .known = tl_host_known};
+    tl_host_known = false;
+    return saved;
+}
+
+void cfiber_asan_host_end(const cfiber_asan_host_t saved) {
+    tl_host_low = saved.low;
+    tl_host_size = saved.size;
+    tl_host_known = saved.known;
+}
+
 #endif /* CFIBER_ASAN_ENABLED */

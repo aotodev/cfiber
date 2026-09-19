@@ -135,6 +135,26 @@ CFIBER_EXPORT void cfiber_asan_on_fiber_entry(void);
  */
 CFIBER_EXPORT void cfiber_asan_host_bounds(const void** low, size_t* size) __attribute__((nonnull));
 
+/** @brief Host bounds in effect before a scheduler run; opaque to callers. */
+typedef struct {
+    const void* low;
+    size_t size;
+    bool known;
+} cfiber_asan_host_t;
+
+/**
+ * @brief Marks the start of a scheduler run: forgets the host bounds so the
+ *        run's first fiber entry records the stack it is entered from.
+ * @details A scheduler run from inside another scheduler's fiber has that
+ *          fiber's stack as its host, not the thread's. Pair with
+ *          cfiber_asan_host_end() when run() returns.
+ * @return The bounds in effect before the call.
+ */
+CFIBER_EXPORT cfiber_asan_host_t cfiber_asan_host_begin(void);
+
+/** @brief Restores the host bounds saved by cfiber_asan_host_begin(). */
+CFIBER_EXPORT void cfiber_asan_host_end(cfiber_asan_host_t saved);
+
 #else /* !CFIBER_ASAN_ENABLED */
 
 /* Force the guard to zero even if the build injected a size: with no ASan there
@@ -165,6 +185,18 @@ cfiber_asan_switch(context_t* from, context_t* to, const void* to_stack_low, siz
 CFIBER_ASAN_INLINE void cfiber_asan_host_bounds(const void** low, size_t* size) {
     *low = nullptr;
     *size = 0;
+}
+
+typedef struct {
+    int unused;
+} cfiber_asan_host_t;
+
+CFIBER_ASAN_INLINE cfiber_asan_host_t cfiber_asan_host_begin(void) {
+    return (cfiber_asan_host_t){0};
+}
+
+CFIBER_ASAN_INLINE void cfiber_asan_host_end(cfiber_asan_host_t saved) {
+    (void)saved;
 }
 
 #endif /* CFIBER_ASAN_ENABLED */

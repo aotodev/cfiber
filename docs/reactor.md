@@ -150,9 +150,11 @@ only after every thread that might still wake or cancel through it has stopped.
 ## Lifecycle
 
 `cfiber_reactor_run()` returns 0 once every fiber has completed and can be
-called again, for example to run fibers spawned after the first run. It returns
--1 with `errno` if the poller fails or a reactor is already running on the
-thread; the fibers it did not finish stay live. `cfiber_reactor_destroy()`
+called again, for example to run fibers spawned after the first run, or from
+inside a fiber of another scheduler or reactor, which is current again when the
+nested run returns. It returns -1 with `errno` if the poller fails or the
+reactor is run from one of its own fibers; the fibers it did not finish stay
+live. `cfiber_reactor_destroy()`
 tears those down without resuming them: stacks and fiber records are released,
 but a descriptor or heap block the fiber itself owned is not, so prefer
 cancelling and letting the run complete when that matters.

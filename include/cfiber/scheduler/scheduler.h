@@ -148,7 +148,10 @@ CFIBER_EXPORT bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, fiber_fn fu
  * @param sched The scheduler to run.
  * @details Blocks the calling thread.  Sets the thread-local "current
  *          scheduler" so that cfiber_yield() and cfiber_spawn() are usable
- *          from within fibers.
+ *          from within fibers, and restores the previous one on return: a
+ *          fiber may run another scheduler to completion and its own is
+ *          current again afterwards. Running a scheduler from one of its own
+ *          fibers is an error (asserts in debug builds).
  */
 CFIBER_EXPORT void cfiber_scheduler_run(cfiber_scheduler_t* sched) __attribute__((nonnull(1)));
 
@@ -158,7 +161,7 @@ CFIBER_EXPORT void cfiber_scheduler_run(cfiber_scheduler_t* sched) __attribute__
 
 /**
  * @brief Return the thread-local scheduler that is currently executing.
- * @return The active scheduler, or NULL if no scheduler is running.
+ * @return The innermost running scheduler, or NULL if none is running.
  */
 CFIBER_EXPORT cfiber_scheduler_t* cfiber_scheduler_current(void);
 
