@@ -14,7 +14,7 @@ Select a compiler at configure time with `CC=clang cmake ...` or
 ## With CMake directly
 
 ```bash
-cmake -B build -DCFIBER_BUILD_EXAMPLES=ON -DBUILD_TESTS=ON
+cmake -B build -DCFIBER_BUILD_EXAMPLES=ON -DCFIBER_BUILD_TESTS=ON
 cmake --build build -j
 ctest --test-dir build
 ```
@@ -52,7 +52,8 @@ that mode.
 | Option                              | Default | Description                                                  |
 | ----------------------------------- | ------- | ------------------------------------------------------------ |
 | `CFIBER_BUILD_EXAMPLES`             | `OFF`   | Build the standalone examples (`examples/`)                  |
-| `BUILD_TESTS`                       | `OFF`   | Build the unit-test executables                              |
+| `CFIBER_BUILD_TESTS`                | `OFF`   | Build the unit-test executables (`BUILD_TESTS` still accepted, deprecated) |
+| `CFIBER_INSTALL`                    | top-level | Generate install rules, the CMake package and `cfiber.pc` |
 | `CFIBER_STACK_SANITIZER`            | `OFF`   | Enable canary + watermark instrumentation                    |
 | `CFIBER_ASAN`                       | `OFF`   | Build with AddressSanitizer + fiber-aware instrumentation (hosted only; excludes `CFIBER_STACK_SANITIZER`) |
 | `CFIBER_ASAN_REDZONE`               | -       | Guard size in bytes below each fiber stack (default: one cache line). Only used with `CFIBER_ASAN` |
@@ -68,8 +69,6 @@ that mode.
 | `CFIBER_ARM_FPU_NAME`               | -       | FPU name forwarded to `-mfpu` (e.g. `fpv5-sp-d16`)           |
 | `CFIBER_SYSTEM_PROCESSOR`           | host    | Target architecture; `arm` selects the freestanding build    |
 
-`BUILD_TESTS` is the one option without the `CFIBER_` prefix.
-
 On Cortex-M the saved context includes `s16`-`s31` whenever the compiler
 targets an FPU (`__ARM_FP`, i.e. `-mfpu` with `softfp` or `hard`), so the
 library and everything linked against it must be built with the same
@@ -79,8 +78,11 @@ library and everything linked against it must be built with the same
 
 The default is a static archive. Shared builds export only the documented API
 (everything declared with `CFIBER_EXPORT` in the public headers) and hide
-everything else via `-fvisibility=hidden`. Shared builds carry the project
-version as `SOVERSION`.
+everything else via `-fvisibility=hidden`. Shared builds carry the major
+version as `SOVERSION`: once 1.0 is tagged, the ABI is stable within a major,
+and the layout-affecting options (`CFIBER_BITMAP_SIZE`, `CFIBER_ASAN_REDZONE`,
+`CFIBER_STACK_SANITIZER`, the ARM float ABI) must match between library and
+consumer. Before 1.0 any release may change it.
 
 The shared build is not available on the freestanding target, since bare-metal
 Cortex-M has no dynamic loader.
@@ -88,12 +90,40 @@ Cortex-M has no dynamic loader.
 If the static library will be linked into a downstream shared object, enable
 `CFIBER_POSITION_INDEPENDENT_CODE` to avoid text-relocation errors.
 
+## Installing and find_package
+
+```bash
+cmake -B build -DCMAKE_INSTALL_PREFIX=/opt/cfiber
+cmake --build build -j
+cmake --install build
+```
+
+installs the library, the headers (including the generated `cfiber/version.h`
+with `CFIBER_VERSION_MAJOR/MINOR/PATCH` and `CFIBER_VERSION_STRING`), a CMake
+package and `cfiber.pc`. A consumer then needs only:
+
+```cmake
+find_package(cfiber CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE cfiber::cfiber)        # and cfiber::reactor
+```
+
+or `pkg-config --cflags --libs cfiber`. The exported targets carry the PUBLIC
+definitions and options of the build that was installed (`BITMAP_SIZE`,
+sanitizer flags, the ARM float ABI), so a consumer matches it without repeating
+them. `tests/consumer/` is the smoke test CI runs against a staged install.
+
 ## Consuming as a subdirectory
 
 ```cmake
 add_subdirectory(external/cfiber)
-target_link_libraries(my_app PRIVATE cfiber)
+target_link_libraries(my_app PRIVATE cfiber::cfiber)
 ```
+
+As a subproject cfiber builds only the library: tests and examples stay off
+unless `CFIBER_BUILD_TESTS` / `CFIBER_BUILD_EXAMPLES` are set, and install
+rules are off unless `CFIBER_INSTALL` is. The ARM ABI flags are PUBLIC on the
+target, so the parent's own translation units and link line get the same
+`-mcpu`, `-mfloat-abi` and `-mfpu`.
 
 To switch to a shared build from a parent project:
 

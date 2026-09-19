@@ -9,7 +9,7 @@ ThreadSanitizer; a time-boxed fuzzing pass over a cached corpus; and the
 pre-commit linters.
 
 ```bash
-cmake -B build -DBUILD_TESTS=ON
+cmake -B build -DCFIBER_BUILD_TESTS=ON
 cmake --build build -j
 ctest --test-dir build
 

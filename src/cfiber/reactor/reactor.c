@@ -23,10 +23,6 @@
  * loop thread itself uses the same command path, so apply logic has a single
  * home and never reenters the running fiber.
  */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "cfiber/reactor/reactor.h"
 
 #include "cfiber/core/macros.h"

@@ -119,6 +119,7 @@ static void check_invariants(const multislab_t* ms, void* const* live, size_t n)
     }
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage): libFuzzer entry point
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     fuzz_input in = fuzz_input_init(data, size);
 

@@ -1,0 +1,9 @@
+prefix=${pcfiledir}/../..
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: cfiber
+Description: Stackful coroutines for C23
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} @CFIBER_PC_LIBS@
+Cflags: -I${includedir} @CFIBER_PC_CFLAGS@

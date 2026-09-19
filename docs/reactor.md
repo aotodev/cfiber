@@ -201,7 +201,8 @@ work that the `cfiber_ev_wait` primitive is designed to accommodate.
 ## Example and testing
 
 A standalone WebSocket (RFC 6455) echo server built on the reactor lives in
-[examples/ws_echo](../examples/ws_echo), built when `CFIBER_REACTOR=ON`. It
+[examples/ws_echo](../examples/ws_echo), built with the reactor when the
+examples or the tests are enabled. It
 covers the handshake, frame parsing, fragmentation and control frames, and ships
 with a self-test client.
 

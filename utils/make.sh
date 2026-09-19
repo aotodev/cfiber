@@ -2,7 +2,7 @@
 # Build script for cfiber. Run from anywhere; auto-detects project root.
 #
 # Usage: ./utils/make.sh [options]
-#   -a, --arch=<arch>  Target architecture (x86_64, aarch64, arm)
+#   -a, --arch=<arch>  Target architecture (x86_64, aarch64, arm); default: the host
 #   -c, --cpu=<cpu>    Target CPU (cortex-m0, cortex-m3, cortex-m4, cortex-m7)
 #       --float-abi=<abi>  ARM float ABI: soft, softfp, hard (cortex-m7 default: hard)
 #       --fpu=<fpu>    ARM FPU for -mfpu, e.g. fpv4-sp-d16 (cortex-m7 default: fpv5-sp-d16)
@@ -14,6 +14,8 @@
 #       --asan         Enable AddressSanitizer (hosted x86_64 only)
 #       --ubsan        Enable UndefinedBehaviorSanitizer (hosted x86_64 only)
 #       --tsan         Enable ThreadSanitizer (hosted x86_64 only; implies --reactor)
+#       --shared       Build cfiber as a shared library (default: static)
+#       --pic          Build the static library with -fPIC
 #       --reactor      Build + test the optional epoll reactor (Linux only)
 #       --clean        Remove the previous build directory before configuring
 #   -h, --help         Show this help message
@@ -45,7 +47,9 @@ usage() {
 Build script for cfiber. Run from anywhere; auto-detects project root.
 
 Usage: $(basename "$0") [options]
-  -a, --arch=<arch>  Target architecture (x86_64, aarch64, arm)
+  -a, --arch=<arch>  Target architecture (x86_64, aarch64, arm); default: the
+                     host. A hosted target equal to the host builds natively,
+                     otherwise through the cross toolchain and QEMU.
   -c, --cpu=<cpu>    Target CPU (cortex-m0, cortex-m3, cortex-m4, cortex-m7)
       --float-abi=<abi>  ARM float ABI: soft, softfp, hard (cortex-m7 default: hard)
       --fpu=<fpu>    ARM FPU for -mfpu, e.g. fpv4-sp-d16 (cortex-m7 default:
@@ -106,7 +110,18 @@ detect_jobs() {
 # under `set -u`.
 # --------------------------------------------------------------------------------------
 build_type=Release
-target_arch="$(uname -m)"
+
+# One spelling per architecture: uname, CMake and the test binary names agree.
+normalize_arch() {
+    case "${1}" in
+        x86_64|AMD64|amd64) echo x86_64 ;;
+        aarch64|arm64)      echo aarch64 ;;
+        *)                  echo "${1}" ;;
+    esac
+}
+
+host_arch="$(normalize_arch "$(uname -m)")"
+target_arch="${host_arch}"
 
 # --------------------------------------------------------------------------------------
 # Early --help (before any tool detection)
@@ -140,8 +155,10 @@ for arg in "$@"; do
         --clean)        clean_build=1 ;;
         -h|--help)      ;;
         -*)             usage >&2; die "unknown option: '${arg}'" ;;
+        *)              usage >&2; die "unexpected argument: '${arg}'" ;;
     esac
 done
+target_arch="$(normalize_arch "${target_arch}")"
 
 # --------------------------------------------------------------------------------------
 # Per-CPU ARM defaults (board / FPU / float-ABI). Used by QEMU emulation too.
@@ -190,18 +207,23 @@ EOF
 }
 
 # --------------------------------------------------------------------------------------
-# Architecture / toolchain selection
+# Architecture / toolchain selection. A hosted target equal to the host builds
+# natively; only aarch64 has a cross toolchain (run under qemu-user).
 # --------------------------------------------------------------------------------------
+native=0
 case "${target_arch}" in
-    x86_64|AMD64)
-        info "building for x86_64"
-        ;;
-
-    aarch64|arm64)
-        info "building for aarch64"
-        require_tool aarch64-linux-gnu-gcc "Install the aarch64-linux-gnu toolchain."
-        toolchain_file="cmake/toolchain-aarch64.cmake"
-        target_cpu="${target_cpu:-cortex-a53}"
+    x86_64|aarch64)
+        if [[ "${target_arch}" == "${host_arch}" ]]; then
+            info "building natively for ${target_arch}"
+            native=1
+        elif [[ "${target_arch}" == aarch64 ]]; then
+            info "cross-building for aarch64"
+            require_tool aarch64-linux-gnu-gcc "Install the aarch64-linux-gnu toolchain."
+            toolchain_file="cmake/toolchain-aarch64.cmake"
+            target_cpu="${target_cpu:-cortex-a53}"
+        else
+            die "no cross toolchain for ${target_arch} on a ${host_arch} host."
+        fi
         ;;
 
     arm)
@@ -231,42 +253,40 @@ fi
 require_tool cmake
 
 # --------------------------------------------------------------------------------------
-# AddressSanitizer: native x86_64 only, and excludes the canary/watermark sanitizer.
+# AddressSanitizer: native builds only (qemu-user cannot host ASan, arm is bare
+# metal), and excludes the canary/watermark sanitizer.
 # --------------------------------------------------------------------------------------
 if [[ "${asan:-OFF}" == ON ]]; then
     if [[ "${stack_sanitizer:-OFF}" == ON ]]; then
         die "--asan and --sanitizer are mutually exclusive (canary word overlaps the ASan redzone)."
     fi
-    case "${target_arch}" in
-        x86_64|AMD64) ;;
-        *) die "--asan is only supported on native x86_64 (aarch64 runs under qemu-user, which ASan does not support; arm is bare metal)." ;;
-    esac
+    if [[ "${native}" != 1 ]]; then
+        die "--asan needs a native build (qemu-user does not support ASan; arm is bare metal)."
+    fi
     export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_stack_use_after_return=1}"
 fi
 
 # --------------------------------------------------------------------------------------
-# UndefinedBehaviorSanitizer: native x86_64 only, the cross toolchains ship no libubsan.
+# UndefinedBehaviorSanitizer: native builds only, the cross toolchains ship no libubsan.
 # --------------------------------------------------------------------------------------
 if [[ "${ubsan:-OFF}" == ON ]]; then
-    case "${target_arch}" in
-        x86_64|AMD64) ;;
-        *) die "--ubsan is only supported on native x86_64 (the aarch64 cross toolchain has no libubsan; arm is bare metal)." ;;
-    esac
+    if [[ "${native}" != 1 ]]; then
+        die "--ubsan needs a native build (the aarch64 cross toolchain has no libubsan; arm is bare metal)."
+    fi
     export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 fi
 
 # --------------------------------------------------------------------------------------
-# ThreadSanitizer: native x86_64 only, excludes ASan. The reactor is the only
+# ThreadSanitizer: native builds only, excludes ASan. The reactor is the only
 # concurrent code, so --tsan implies --reactor.
 # --------------------------------------------------------------------------------------
 if [[ "${tsan:-OFF}" == ON ]]; then
     if [[ "${asan:-OFF}" == ON ]]; then
         die "--tsan and --asan are mutually exclusive (incompatible sanitizer runtimes)."
     fi
-    case "${target_arch}" in
-        x86_64|AMD64) ;;
-        *) die "--tsan is only supported on native x86_64 (qemu-user does not support ThreadSanitizer)." ;;
-    esac
+    if [[ "${native}" != 1 ]]; then
+        die "--tsan needs a native build (qemu-user does not support ThreadSanitizer)."
+    fi
     reactor=ON
     export TSAN_OPTIONS="${TSAN_OPTIONS:-halt_on_error=1:second_deadlock_stack=1}"
 fi
@@ -276,7 +296,7 @@ fi
 # --------------------------------------------------------------------------------------
 if [[ "${reactor:-OFF}" == ON ]]; then
     case "${target_arch}" in
-        x86_64|AMD64|aarch64|arm64) ;;
+        x86_64|aarch64) ;;
         *) die "--reactor is Linux only (epoll/eventfd); the arm target is bare metal." ;;
     esac
 fi
@@ -300,7 +320,7 @@ section "cfiber for ${target_arch}${target_cpu:+/${target_cpu}} (${build_type})"
 
 cmake -S "${project_root}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE="${build_type}" \
-    -DBUILD_TESTS="${build_tests:-OFF}" \
+    -DCFIBER_BUILD_TESTS="${build_tests:-OFF}" \
     -DCFIBER_BUILD_EXAMPLES="${build_examples:-OFF}" \
     -DCFIBER_STACK_SANITIZER="${stack_sanitizer:-OFF}" \
     -DCFIBER_ASAN="${asan:-OFF}" \
@@ -363,11 +383,14 @@ run_executable() {
         die "executable not found: ${exe}"
     fi
 
+    if [[ "${native}" == 1 ]]; then
+        "${exe}"
+        return
+    fi
     case "${target_arch}" in
-        x86_64|AMD64)     "${exe}" ;;
-        aarch64|arm64)    emulate_aarch64_with_qemu "${exe}" ;;
-        arm)              emulate_arm_with_qemu "${exe}" ;;
-        *)                die "can't run '${exe}' for arch '${target_arch}'" ;;
+        aarch64) emulate_aarch64_with_qemu "${exe}" ;;
+        arm)     emulate_arm_with_qemu "${exe}" ;;
+        *)       die "can't run '${exe}' for arch '${target_arch}'" ;;
     esac
 }
 

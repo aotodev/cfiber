@@ -23,11 +23,12 @@ tests/
   defensive/   misuse / error-path tests (built with NDEBUG)
   cortex/      Cortex-M support code tests (RAM layout, _sbrk)
   test/        the minimal test framework (test.h + test.c)
+  consumer/    out-of-tree find_package smoke test (CI, against a staged install)
 fuzz/          libFuzzer harnesses for the allocators, scheduler and reactor
 utils/
   make.sh      build + run convenience script
   cortex/      startup code and linker scripts for QEMU Cortex-M targets
-cmake/         toolchain files and helpers
+cmake/         toolchain files, helpers, package-config and version templates
 ci/            Containerfile for the CI toolchain image
 .github/
   workflows/   per-target CI workflows

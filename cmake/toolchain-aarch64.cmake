@@ -19,7 +19,6 @@ set(CMAKE_SIZE         ${_toolchain_prefix}size)
 set(CMAKE_AR           ${_toolchain_prefix}ar)
 set(CMAKE_RANLIB       ${_toolchain_prefix}ranlib)
 set(CMAKE_LINKER       ${_toolchain_prefix}ld)
-set(CMAKE_LINKER_TYPE  BFD)
 
 execute_process(
     COMMAND ${CMAKE_C_COMPILER} -print-sysroot

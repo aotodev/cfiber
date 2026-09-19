@@ -1,6 +1,3 @@
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include "ws_echo.h"
 
 #include <arpa/inet.h>
