@@ -202,9 +202,12 @@ work that the `cfiber_ev_wait` primitive is designed to accommodate.
 
 A standalone WebSocket (RFC 6455) echo server built on the reactor lives in
 [examples/ws_echo](../examples/ws_echo), built with the reactor when the
-examples or the tests are enabled. It
-covers the handshake, frame parsing, fragmentation and control frames, and ships
-with a self-test client.
+examples or the tests are enabled. It covers the handshake (validated, with a
+frame pipelined behind the request preserved), frame parsing with the RFC 6455
+checks (masking, RSV bits, opcodes, minimal lengths, control-frame limits),
+fragment reassembly, control frames, and close codes 1002 and 1009 on
+violations. It ships with a self-test client that exercises all of that on
+ephemeral ports with bounded reads.
 
 The reactor has its own CI job, its own libFuzzer target, and is the reason
 `CFIBER_TSAN` exists: the cross-thread ring and the eventfd wakeup are the only

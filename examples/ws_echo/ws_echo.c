@@ -1,12 +1,14 @@
 #include "ws_echo.h"
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -23,12 +25,23 @@ static uint32_t rol(uint32_t v, int c) {
     return (v << c) | (v >> (32 - c));
 }
 
+static uint32_t load_be32(const unsigned char* p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static void store_be32(unsigned char* p, uint32_t v) {
+    p[0] = (unsigned char)(v >> 24);
+    p[1] = (unsigned char)(v >> 16);
+    p[2] = (unsigned char)(v >> 8);
+    p[3] = (unsigned char)v;
+}
+
 static void sha1_block(sha1_t* s, const unsigned char* p) {
     uint32_t w[80];
-    for (int i = 0; i < 16; i++) {
-        w[i] = (uint32_t)p[i * 4] << 24 | (uint32_t)p[i * 4 + 1] << 16 | (uint32_t)p[i * 4 + 2] << 8 | p[i * 4 + 3];
+    for (size_t i = 0; i < 16; i++) {
+        w[i] = load_be32(p + (i * 4));
     }
-    for (int i = 16; i < 80; i++) {
+    for (size_t i = 16; i < 80; i++) {
         w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
     }
 
@@ -88,11 +101,8 @@ void ws_sha1(const unsigned char* data, size_t len, unsigned char out[20]) {
     }
     sha1_block(&s, s.buf);
 
-    for (int i = 0; i < 5; i++) {
-        out[i * 4] = (unsigned char)(s.h[i] >> 24);
-        out[i * 4 + 1] = (unsigned char)(s.h[i] >> 16);
-        out[i * 4 + 2] = (unsigned char)(s.h[i] >> 8);
-        out[i * 4 + 3] = (unsigned char)(s.h[i]);
+    for (size_t i = 0; i < 5; i++) {
+        store_be32(out + (i * 4), s.h[i]);
     }
 }
 
@@ -120,17 +130,42 @@ int ws_base64(const unsigned char* in, size_t len, char* out, size_t out_cap) {
     return (int)o;
 }
 
-/* ---- WebSocket framing (all I/O goes through the reactor helpers) ---- */
+/* ---- Connection: buffered reader over the reactor helpers ---- */
 
 #define WS_MAGIC "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-#define MAX_PAYLOAD (64 * 1024)
+#define MAX_PAYLOAD ((size_t)64 * 1024)
+#define MAX_REQUEST 4096
 
 enum { OP_CONT = 0x0, OP_TEXT = 0x1, OP_BIN = 0x2, OP_CLOSE = 0x8, OP_PING = 0x9, OP_PONG = 0xA };
+enum { CLOSE_NORMAL = 1000, CLOSE_PROTOCOL = 1002, CLOSE_TOO_BIG = 1009 };
 
-/* Read exactly n bytes. Returns 1 on success, 0 if the peer closed, -1 on error. */
-static int read_exact(int fd, void* buf, size_t n) {
-    for (size_t off = 0; off < n;) {
-        ssize_t r = cfiber_ev_read(fd, (char*)buf + off, n - off);
+typedef struct {
+    int fd;
+    /* Bytes read past the handshake terminator: a client may pipeline its
+     * first frame behind the upgrade request, and they must not be lost. */
+    unsigned char carry[MAX_REQUEST];
+    size_t carry_off;
+    size_t carry_len;
+    /* The message being reassembled from fragments, if any. */
+    unsigned char* msg;
+    size_t msg_len;
+    int msg_op; /* OP_TEXT or OP_BIN while assembling, -1 otherwise */
+} conn_t;
+
+/* Read exactly n bytes, carried bytes first. 1 on success, 0 if the peer closed, -1 on error. */
+static int conn_read_exact(conn_t* c, void* buf, size_t n) {
+    size_t off = 0;
+    if (c->carry_off < c->carry_len) {
+        size_t take = c->carry_len - c->carry_off;
+        if (take > n) {
+            take = n;
+        }
+        memcpy(buf, c->carry + c->carry_off, take);
+        c->carry_off += take;
+        off = take;
+    }
+    while (off < n) {
+        ssize_t r = cfiber_ev_read(c->fd, (char*)buf + off, n - off);
         if (r == 0) {
             return 0;
         }
@@ -152,7 +187,7 @@ static int send_frame(int fd, int opcode, const unsigned char* payload, size_t l
     } else if (len <= 0xFFFF) {
         hdr[h++] = 126;
         hdr[h++] = (unsigned char)(len >> 8);
-        hdr[h++] = (unsigned char)(len);
+        hdr[h++] = (unsigned char)len;
     } else {
         hdr[h++] = 127;
         for (int i = 7; i >= 0; i--) {
@@ -168,102 +203,179 @@ static int send_frame(int fd, int opcode, const unsigned char* payload, size_t l
     return 0;
 }
 
+static int send_close(int fd, int code) {
+    unsigned char body[2] = {(unsigned char)(code >> 8), (unsigned char)code};
+    return send_frame(fd, OP_CLOSE, body, sizeof body);
+}
+
+typedef struct {
+    int fin;
+    int opcode;
+    size_t len;
+} frame_hdr_t;
+
 /*
- * Read one frame into `payload` (unmasked in place). Returns 1 on success,
- * 0 if the peer closed, -1 on error or protocol violation.
+ * Read one client frame into `payload` (unmasked in place). Returns 1 on
+ * success, 0 if the peer closed, -1 on I/O error, or the close code to send
+ * (> 0, >= 1000) on a protocol violation.
  */
-static int recv_frame(int fd, int* opcode, unsigned char* payload, size_t* len) {
+static int recv_frame(conn_t* c, frame_hdr_t* hdr, unsigned char* payload) {
     unsigned char b[2];
-    int rc = read_exact(fd, b, 2);
+    int rc = conn_read_exact(c, b, 2);
     if (rc <= 0) {
         return rc;
     }
-    *opcode = b[0] & 0x0F;
-    int masked = b[1] & 0x80;
+    hdr->fin = b[0] & 0x80;
+    hdr->opcode = b[0] & 0x0F;
+    const int rsv = b[0] & 0x70;
+    const int masked = b[1] & 0x80;
     uint64_t n = b[1] & 0x7F;
+
+    /* RSV bits need an extension, reserved opcodes have no meaning, and a
+     * client frame is always masked. */
+    const int known = hdr->opcode <= OP_BIN || (hdr->opcode >= OP_CLOSE && hdr->opcode <= OP_PONG);
+    if (rsv || !known || !masked) {
+        return CLOSE_PROTOCOL;
+    }
 
     if (n == 126) {
         unsigned char e[2];
-        if (read_exact(fd, e, 2) <= 0) {
+        if (conn_read_exact(c, e, 2) <= 0) {
             return -1;
         }
-        n = (uint64_t)e[0] << 8 | e[1];
+        n = ((uint64_t)e[0] << 8) | e[1];
+        if (n < 126) {
+            return CLOSE_PROTOCOL; /* length must use the shortest encoding */
+        }
     } else if (n == 127) {
         unsigned char e[8];
-        if (read_exact(fd, e, 8) <= 0) {
+        if (conn_read_exact(c, e, 8) <= 0) {
             return -1;
         }
         n = 0;
         for (int i = 0; i < 8; i++) {
             n = (n << 8) | e[i];
         }
-    }
-    if (n > MAX_PAYLOAD) {
-        return -1;
-    }
-
-    unsigned char mask[4] = {0};
-    if (masked && read_exact(fd, mask, 4) <= 0) {
-        return -1;
-    }
-    if (n && read_exact(fd, payload, (size_t)n) <= 0) {
-        return -1;
-    }
-    if (masked) {
-        for (uint64_t i = 0; i < n; i++) {
-            payload[i] ^= mask[i & 3];
+        if (n <= 0xFFFF || (n >> 63)) {
+            return CLOSE_PROTOCOL;
         }
     }
+    if (hdr->opcode >= OP_CLOSE && (!hdr->fin || n > 125)) {
+        return CLOSE_PROTOCOL; /* control frames: unfragmented, at most 125 bytes */
+    }
+    if (n > MAX_PAYLOAD) {
+        return CLOSE_TOO_BIG;
+    }
 
-    *len = (size_t)n;
+    unsigned char mask[4];
+    if (conn_read_exact(c, mask, 4) <= 0) {
+        return -1;
+    }
+    if (n && conn_read_exact(c, payload, (size_t)n) <= 0) {
+        return -1;
+    }
+    for (uint64_t i = 0; i < n; i++) {
+        payload[i] ^= mask[i & 3];
+    }
+
+    hdr->len = (size_t)n;
     return 1;
 }
 
 /* ---- Handshake ---- */
 
-static int do_handshake(int fd) {
-    /* Read request headers until the terminating CRLFCRLF. */
-    char req[4096];
+/* Offset just past the first CRLFCRLF in buf, or 0 if there is none. */
+static size_t find_header_end(const unsigned char* buf, size_t len) {
+    for (size_t i = 3; i < len; i++) {
+        if (buf[i - 3] == '\r' && buf[i - 2] == '\n' && buf[i - 1] == '\r' && buf[i] == '\n') {
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+/* Value of the header `name` (case-insensitive, anchored at a line start),
+ * trimmed of leading blanks and with `*vlen` its length; NULL if absent. */
+static const char* find_header(const char* req, const char* name, size_t* vlen) {
+    const size_t nlen = strlen(name);
+    for (const char* line = strstr(req, "\r\n"); line; line = strstr(line, "\r\n")) {
+        line += 2;
+        if (strncasecmp(line, name, nlen) == 0 && line[nlen] == ':') {
+            const char* v = line + nlen + 1;
+            while (*v == ' ' || *v == '\t') {
+                v++;
+            }
+            const char* end = strstr(v, "\r\n");
+            if (!end) {
+                return NULL;
+            }
+            *vlen = (size_t)(end - v);
+            return v;
+        }
+    }
+    return NULL;
+}
+
+static int header_is(const char* req, const char* name, const char* want) {
+    size_t vlen = 0;
+    const char* v = find_header(req, name, &vlen);
+    return v && vlen == strlen(want) && strncasecmp(v, want, vlen) == 0;
+}
+
+static void reject(int fd, const char* status) {
+    char resp[128];
+    int n = snprintf(resp, sizeof resp, "HTTP/1.1 %s\r\nConnection: close\r\n\r\n", status);
+    if (n > 0) {
+        (void)cfiber_ev_write(fd, resp, (size_t)n);
+    }
+}
+
+/*
+ * Read the upgrade request, validate it, answer 101. Bytes that arrived after
+ * the request stay in the connection's carry buffer for the frame reader.
+ */
+static int do_handshake(conn_t* c) {
+    unsigned char* req = c->carry;
     size_t total = 0;
-    while (total < sizeof(req) - 1) {
-        ssize_t r = cfiber_ev_read(fd, req + total, sizeof(req) - 1 - total);
+    size_t hdr_end = 0;
+    while (!hdr_end) {
+        if (total >= MAX_REQUEST - 1) {
+            reject(c->fd, "431 Request Header Fields Too Large");
+            return -1;
+        }
+        ssize_t r = cfiber_ev_read(c->fd, req + total, MAX_REQUEST - 1 - total);
         if (r <= 0) {
             return -1;
         }
         total += (size_t)r;
-        req[total] = '\0';
-        if (strstr(req, "\r\n\r\n")) {
-            break;
-        }
+        hdr_end = find_header_end(req, total);
     }
+    c->carry_off = hdr_end;
+    c->carry_len = total;
 
-    /* Locate Sec-WebSocket-Key (header names are case-insensitive). */
-    const char* key = NULL;
-    for (char* p = req; *p; p++) {
-        if (strncasecmp(p, "Sec-WebSocket-Key:", 18) == 0) {
-            key = p + 18;
-            break;
-        }
-    }
-    if (!key) {
-        return -1;
-    }
-    while (*key == ' ' || *key == '\t') {
-        key++;
-    }
-    const char* end = strstr(key, "\r\n");
-    if (!end) {
-        return -1;
-    }
-    size_t klen = (size_t)(end - key);
-    if (klen == 0 || klen > 256) {
+    /* NUL-terminate the header block for the string scans; the frame bytes
+     * behind it are untouched. */
+    char saved = (char)req[hdr_end - 1];
+    req[hdr_end - 1] = '\0';
+    const char* text = (const char*)req;
+
+    size_t klen = 0;
+    const char* key = find_header(text, "Sec-WebSocket-Key", &klen);
+    const int ok = strncmp(text, "GET ", 4) == 0 && header_is(text, "Upgrade", "websocket")
+                   && header_is(text, "Sec-WebSocket-Version", "13") && key && klen > 0 && klen <= 256;
+    if (!ok) {
+        req[hdr_end - 1] = (unsigned char)saved;
+        reject(c->fd, "400 Bad Request");
         return -1;
     }
 
     /* accept = base64(sha1(key + magic GUID)). */
     unsigned char concat[256 + 36];
+    /* NOLINTBEGIN(bugprone-not-null-terminated-result): binary concat, hashed */
     memcpy(concat, key, klen);
     memcpy(concat + klen, WS_MAGIC, 36);
+    /* NOLINTEND(bugprone-not-null-terminated-result) */
+    req[hdr_end - 1] = (unsigned char)saved;
 
     unsigned char digest[20];
     ws_sha1(concat, klen + 36, digest);
@@ -284,59 +396,104 @@ static int do_handshake(int fd) {
     if (rn < 0 || (size_t)rn >= sizeof resp) {
         return -1;
     }
-    return cfiber_ev_write(fd, resp, (size_t)rn) < 0 ? -1 : 0;
+    return cfiber_ev_write(c->fd, resp, (size_t)rn) < 0 ? -1 : 0;
 }
 
 /* ---- Fibers ---- */
 
-/* One per connection: handshake, then echo every frame until the peer leaves. */
-static void conn_fiber(void* arg) {
-    int fd = (int)(intptr_t)arg;
+/*
+ * Handle one data frame. Fragments are collected until FIN and echoed as one
+ * message with the first fragment's opcode. Returns 0, or the close code for a
+ * violation (a data frame while a message is open, a continuation without one).
+ */
+static int on_data_frame(conn_t* c, const frame_hdr_t* h, const unsigned char* payload) {
+    if (h->opcode == OP_CONT) {
+        if (c->msg_op < 0) {
+            return CLOSE_PROTOCOL;
+        }
+    } else {
+        if (c->msg_op >= 0) {
+            return CLOSE_PROTOCOL;
+        }
+        if (h->fin) {
+            return send_frame(c->fd, h->opcode, payload, h->len) < 0 ? -1 : 0;
+        }
+        c->msg_op = h->opcode;
+        c->msg_len = 0;
+    }
+    if (h->len > MAX_PAYLOAD - c->msg_len) {
+        return CLOSE_TOO_BIG;
+    }
+    memcpy(c->msg + c->msg_len, payload, h->len);
+    c->msg_len += h->len;
+    if (!h->fin) {
+        return 0;
+    }
+    const int op = c->msg_op;
+    c->msg_op = -1;
+    return send_frame(c->fd, op, c->msg, c->msg_len) < 0 ? -1 : 0;
+}
 
-    if (do_handshake(fd) < 0) {
-        close(fd);
+/* One per connection: handshake, then echo every message until the peer leaves. */
+static void conn_fiber(void* arg) {
+    conn_t* c = calloc(1, sizeof *c);
+    if (!c) {
+        close((int)(intptr_t)arg);
         return;
     }
+    c->fd = (int)(intptr_t)arg;
+    c->msg_op = -1;
 
-    /* Heap, not the fiber stack: 64 KiB per fiber stack would be wasteful, and a
-     * static buffer would be corrupted by concurrent connections. */
+    /* Heap, not the fiber stack: two 64 KiB buffers per fiber stack would be
+     * wasteful, and a static buffer would be shared between connections. */
     unsigned char* payload = malloc(MAX_PAYLOAD);
-    if (!payload) {
-        close(fd);
-        return;
+    c->msg = malloc(MAX_PAYLOAD);
+    if (!payload || !c->msg || do_handshake(c) < 0) {
+        goto done;
     }
 
     for (;;) {
-        int op;
-        size_t len;
-        if (recv_frame(fd, &op, payload, &len) <= 0) {
+        frame_hdr_t h;
+        int rc = recv_frame(c, &h, payload);
+        if (rc <= 0) {
             break;
         }
-        if (op == OP_CLOSE) {
-            send_frame(fd, OP_CLOSE, payload, len); /* echo the close, then leave */
+        if (rc > 1) {
+            send_close(c->fd, rc); /* protocol violation: tell the peer why, then leave */
             break;
         }
-        if (op == OP_PING) {
-            if (send_frame(fd, OP_PONG, payload, len) < 0) {
+        if (h.opcode == OP_CLOSE) {
+            send_frame(c->fd, OP_CLOSE, payload, h.len); /* echo the close, then leave */
+            break;
+        }
+        if (h.opcode == OP_PING) {
+            if (send_frame(c->fd, OP_PONG, payload, h.len) < 0) {
                 break;
             }
             continue;
         }
-        if (op == OP_PONG) {
+        if (h.opcode == OP_PONG) {
             continue; /* unsolicited pong: ignore */
         }
-        /* text / binary / continuation: echo it straight back */
-        if (send_frame(fd, op == OP_CONT ? OP_TEXT : op, payload, len) < 0) {
+        rc = on_data_frame(c, &h, payload);
+        if (rc < 0) {
+            break;
+        }
+        if (rc > 0) {
+            send_close(c->fd, rc);
             break;
         }
     }
 
+done:
     free(payload);
-    close(fd);
+    free(c->msg);
+    close(c->fd);
+    free(c);
 }
 
 typedef struct {
-    int port;
+    int lfd;
     int max_conns;
 } listen_args_t;
 
@@ -345,30 +502,19 @@ static void listen_fiber(void* arg) {
     listen_args_t a = *(listen_args_t*)arg;
     free(arg);
 
-    int lfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if (lfd < 0) {
-        return;
-    }
     int one = 1;
-    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-
-    struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons((uint16_t)a.port)};
-    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(lfd, (struct sockaddr*)&sa, sizeof sa) < 0) {
-        perror("bind");
-        close(lfd);
-        return;
-    }
-    if (listen(lfd, 128) < 0) {
-        perror("listen");
-        close(lfd);
-        return;
-    }
-    fprintf(stderr, "[ws] listening on 127.0.0.1:%d\n", a.port);
-
     for (int served = 0;;) {
-        int c = cfiber_ev_accept(lfd, NULL, NULL);
+        int c = cfiber_ev_accept(a.lfd, NULL, NULL);
         if (c < 0) {
+            /* Transient: a peer that hung up before accept, or the process being
+             * out of descriptors for a moment. Anything else ends the listener. */
+            if (errno == ECONNABORTED) {
+                continue;
+            }
+            if (errno == EMFILE || errno == ENFILE) {
+                (void)cfiber_ev_sleep((uint64_t)10 * 1000 * 1000);
+                continue;
+            }
             break;
         }
         setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
@@ -380,18 +526,38 @@ static void listen_fiber(void* arg) {
             break;
         }
     }
-    close(lfd);
+    close(a.lfd);
 }
 
 int ws_serve(cfiber_reactor_t* r, int port, int max_conns) {
+    int lfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (lfd < 0) {
+        return -1;
+    }
+    int one = 1;
+    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+
+    struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons((uint16_t)port)};
+    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t salen = sizeof sa;
+    if (bind(lfd, (struct sockaddr*)&sa, salen) < 0 || listen(lfd, SOMAXCONN) < 0
+        || getsockname(lfd, (struct sockaddr*)&sa, &salen) < 0) {
+        const int saved = errno;
+        close(lfd);
+        errno = saved;
+        return -1;
+    }
+
     listen_args_t* a = malloc(sizeof *a);
     if (!a) {
+        close(lfd);
         return -1;
     }
-    *a = (listen_args_t){.port = port, .max_conns = max_conns};
+    *a = (listen_args_t){.lfd = lfd, .max_conns = max_conns};
     if (!cfiber_reactor_spawn(r, listen_fiber, a, NULL)) {
         free(a);
+        close(lfd);
         return -1;
     }
-    return 0;
+    return ntohs(sa.sin_port);
 }
