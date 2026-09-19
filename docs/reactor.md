@@ -119,6 +119,9 @@ Deadlines go into a monotonic min-heap, and the nearest one becomes the
 `epoll_wait` timeout. There is no timerfd and no per-timer descriptor, so a
 deadline costs a heap entry rather than a kernel object, and `cfiber_ev_sleep`
 and the `_timed` variants are the same mechanism with different entry points.
+The `_timed` helpers treat their argument as a total deadline for the call,
+across every partial read or write it takes. Deadline arithmetic saturates, so
+`INT64_MAX` is a practical "never".
 
 ## Waking and cancelling across threads
 
@@ -138,6 +141,14 @@ Cancelling a parked fiber resumes it with `CFIBER_EV_CANCELLED`, and an
 in-flight transport helper turns that into `-1` with `errno == ECANCELED`, so
 cancellation surfaces as an ordinary error return at the call site rather than
 as an unwind.
+
+A wake is narrower: it completes a `cfiber_ev_wait_async()` and nothing else. A
+fiber parked on a descriptor or a timer is not disturbed by it; the wake is kept
+as a permit and the fiber's next `wait_async` returns immediately. That is what
+makes the usual pattern safe: hand work to a thread, read from a socket in the
+meantime, then `wait_async` for the result, without the thread's wake being
+consumed by the read. Wakes do not accumulate, so the permit is a flag, not a
+counter.
 
 `cfiber_reactor_handle_t` is a generation-tagged reference into an
 address-stable fiber pool (cfiber's `multislab`). Waking or cancelling a fiber

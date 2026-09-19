@@ -641,6 +641,283 @@ static int test_nested_reactor(void) {
 }
 
 /* ============================================================================
+ * wake semantics: only an async park is resumed; early wakes are kept
+ * ============================================================================ */
+
+static int64_t mono_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ((int64_t)ts.tv_sec * 1000) + (ts.tv_nsec / 1000000);
+}
+
+typedef struct {
+    cfiber_reactor_handle_t self;
+    ssize_t read_rc; /* timed read while a wake arrives: must time out */
+    int read_errno;
+    cfiber_ev_status_t async_st; /* the wake is kept for this wait */
+    int64_t async_ms;            /* how long that wait took */
+} wake_fd_state;
+
+static wake_fd_state g_wfd;
+static int g_wfd_fd;
+
+static void wake_fd_target_fiber(void* arg) {
+    (void)arg;
+    g_wfd.self = cfiber_ev_self();
+    char buf[8];
+    g_wfd.read_rc = cfiber_ev_read_timed(g_wfd_fd, buf, sizeof buf, ms_to_ns(30));
+    g_wfd.read_errno = errno;
+
+    const int64_t t0 = mono_ms();
+    g_wfd.async_st = cfiber_ev_wait_async(ms_to_ns(500));
+    g_wfd.async_ms = mono_ms() - t0;
+}
+
+static void wake_fd_waker_fiber(void* arg) {
+    (void)arg;
+    cfiber_ev_yield(); /* let the target park on the descriptor */
+    cfiber_ev_wake(g_wfd.self);
+}
+
+static int test_wake_does_not_resume_fd_park(void) {
+    memset(&g_wfd, 0, sizeof g_wfd);
+    g_wfd.read_rc = -2;
+    g_wfd.async_st = CFIBER_EV_ERROR;
+    g_wfd.async_ms = -1;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+    g_wfd_fd = fds[0];
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, wake_fd_target_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, wake_fd_waker_fiber, nullptr, nullptr));
+
+    cfiber_reactor_run(r);
+
+    /* the read ran to its own deadline, untouched by the wake */
+    ASSERT_EQ_U32((uint32_t)(int)g_wfd.read_rc, (uint32_t)-1);
+    ASSERT_EQ_U32(g_wfd.read_errno, ETIMEDOUT);
+    /* and the wake was waiting for the async park */
+    ASSERT_EQ_U32(g_wfd.async_st, CFIBER_EV_READY);
+    ASSERT_TRUE(g_wfd.async_ms < 100);
+
+    close(fds[0]);
+    close(fds[1]);
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+typedef struct {
+    cfiber_reactor_handle_t self;
+    cfiber_ev_status_t sleep_st;
+    int64_t sleep_ms;
+    cfiber_ev_status_t async_st;
+} wake_sleep_state;
+
+static wake_sleep_state g_wsl;
+
+static void wake_sleep_target_fiber(void* arg) {
+    (void)arg;
+    g_wsl.self = cfiber_ev_self();
+    const int64_t t0 = mono_ms();
+    g_wsl.sleep_st = cfiber_ev_sleep((uint64_t)ms_to_ns(30));
+    g_wsl.sleep_ms = mono_ms() - t0;
+    g_wsl.async_st = cfiber_ev_wait_async(ms_to_ns(500)); /* satisfied by the kept wake */
+}
+
+static void wake_sleep_waker_fiber(void* arg) {
+    (void)arg;
+    cfiber_ev_yield();
+    cfiber_ev_wake(g_wsl.self);
+}
+
+static int test_wake_does_not_cut_sleep(void) {
+    memset(&g_wsl, 0, sizeof g_wsl);
+    g_wsl.sleep_st = CFIBER_EV_ERROR;
+    g_wsl.async_st = CFIBER_EV_ERROR;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, wake_sleep_target_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, wake_sleep_waker_fiber, nullptr, nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_wsl.sleep_st, CFIBER_EV_TIMEOUT);
+    ASSERT_TRUE(g_wsl.sleep_ms >= 25);
+    ASSERT_EQ_U32(g_wsl.async_st, CFIBER_EV_READY);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* A wake posted while the target is merely ready (not yet parked) is kept. */
+static cfiber_reactor_handle_t g_early_target;
+static cfiber_ev_status_t g_early_st;
+static int64_t g_early_ms;
+
+static void early_wake_target_fiber(void* arg) {
+    (void)arg;
+    g_early_target = cfiber_ev_self();
+    cfiber_ev_yield(); /* the waker runs now, before we park */
+    const int64_t t0 = mono_ms();
+    g_early_st = cfiber_ev_wait_async(ms_to_ns(500));
+    g_early_ms = mono_ms() - t0;
+}
+
+static void early_waker_fiber(void* arg) {
+    (void)arg;
+    cfiber_ev_wake(g_early_target);
+}
+
+static int test_wake_before_wait_async_is_kept(void) {
+    g_early_st = CFIBER_EV_ERROR;
+    g_early_ms = -1;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, early_wake_target_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, early_waker_fiber, nullptr, nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_early_st, CFIBER_EV_READY);
+    ASSERT_TRUE(g_early_ms < 100);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
+ * deadlines: total for _timed helpers, saturating arithmetic
+ * ============================================================================ */
+
+#define SLOW_WRITE_TOTAL ((size_t)8 << 20)
+#define SLOW_DRAIN_CHUNK ((size_t)256 << 10) /* empties the socket buffer in one read */
+
+typedef struct {
+    int wfd;
+    int rfd;
+    ssize_t write_rc;
+    int write_errno;
+    int64_t write_ms;
+    volatile int writer_done;
+} slow_drain_state;
+
+static slow_drain_state g_slow;
+
+static void slow_drain_writer_fiber(void* arg) {
+    slow_drain_state* st = arg;
+    static char big[SLOW_WRITE_TOTAL];
+    const int64_t t0 = mono_ms();
+    st->write_rc = cfiber_ev_write_timed(st->wfd, big, sizeof big, ms_to_ns(100));
+    st->write_errno = errno;
+    st->write_ms = mono_ms() - t0;
+    st->writer_done = 1;
+}
+
+/* Empties the socket buffer every 40 ms, so the writer gets EPOLLOUT well
+ * inside a per-retry timeout of 100 ms and progresses a buffer per tick; only
+ * a total deadline ends the write before the seconds the whole 8 MiB take. */
+static void slow_drain_reader_fiber(void* arg) {
+    slow_drain_state* st = arg;
+    static char buf[SLOW_DRAIN_CHUNK];
+    while (!st->writer_done) {
+        (void)cfiber_ev_sleep((uint64_t)ms_to_ns(40));
+        (void)read(st->rfd, buf, sizeof buf);
+    }
+}
+
+static int test_timed_write_total_deadline(void) {
+    memset(&g_slow, 0, sizeof g_slow);
+    g_slow.write_rc = -2;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+    g_slow.wfd = fds[0];
+    g_slow.rfd = fds[1];
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, slow_drain_writer_fiber, &g_slow, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, slow_drain_reader_fiber, &g_slow, nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32((uint32_t)(int)g_slow.write_rc, (uint32_t)-1);
+    ASSERT_EQ_U32(g_slow.write_errno, ETIMEDOUT);
+    ASSERT_TRUE(g_slow.write_ms >= 90);
+    ASSERT_TRUE(g_slow.write_ms < 800); /* per-retry semantics would take seconds */
+    ASSERT_TRUE(g_slow.write_rc == -1); /* and not a completed 8 MiB */
+
+    close(fds[0]);
+    close(fds[1]);
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+static cfiber_reactor_handle_t g_far_target;
+static cfiber_ev_status_t g_far_sleep_st;
+static cfiber_ev_status_t g_far_async_st;
+
+static void far_deadline_fiber(void* arg) {
+    (void)arg;
+    g_far_target = cfiber_ev_self();
+    g_far_sleep_st = cfiber_ev_sleep(UINT64_MAX);     /* would wrap: must not elapse */
+    g_far_async_st = cfiber_ev_wait_async(INT64_MAX); /* same */
+}
+
+static void far_canceller_fiber(void* arg) {
+    (void)arg;
+    for (int i = 0; i < 2; i++) {
+        (void)cfiber_ev_sleep((uint64_t)ms_to_ns(10));
+        cfiber_ev_cancel(g_far_target);
+    }
+}
+
+static int test_far_deadlines_do_not_wrap(void) {
+    g_far_sleep_st = CFIBER_EV_ERROR;
+    g_far_async_st = CFIBER_EV_ERROR;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, far_deadline_fiber, nullptr, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, far_canceller_fiber, nullptr, nullptr));
+
+    cfiber_reactor_run(r);
+
+    /* both waits lasted until the cancel, neither timed out on the spot */
+    ASSERT_EQ_U32(g_far_sleep_st, CFIBER_EV_CANCELLED);
+    ASSERT_EQ_U32(g_far_async_st, CFIBER_EV_CANCELLED);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+#ifdef NDEBUG
+/* Release builds: the in-fiber API off the loop thread fails, not faults. */
+static int test_in_fiber_api_off_loop_thread(void) {
+    errno = 0;
+    ASSERT_EQ_U32(cfiber_ev_wait_async(0), CFIBER_EV_ERROR);
+    ASSERT_EQ_U32(errno, EINVAL);
+    errno = 0;
+    ASSERT_EQ_U32(cfiber_ev_sleep(0), CFIBER_EV_ERROR);
+    ASSERT_EQ_U32(errno, EINVAL);
+    errno = 0;
+    ASSERT_EQ_U32(cfiber_ev_wait(0, EPOLLIN, 0), CFIBER_EV_ERROR);
+    ASSERT_EQ_U32(errno, EINVAL);
+    errno = 0;
+    ASSERT_FALSE(cfiber_ev_spawn(trivial_fiber, nullptr, nullptr));
+    ASSERT_EQ_U32(errno, EINVAL);
+    ASSERT_NULL(cfiber_ev_self().f);
+    cfiber_ev_yield(); /* no-op */
+    return 0;
+}
+#endif
+
+/* ============================================================================
  * loop fairness: yield loops must not starve timers, I/O or commands
  * ============================================================================ */
 
@@ -1049,6 +1326,14 @@ int main(void) {
     RUN_TEST(test_run_reports_poller_failure);
     RUN_TEST(test_run_twice);
     RUN_TEST(test_nested_reactor);
+    RUN_TEST(test_wake_does_not_resume_fd_park);
+    RUN_TEST(test_wake_does_not_cut_sleep);
+    RUN_TEST(test_wake_before_wait_async_is_kept);
+    RUN_TEST(test_timed_write_total_deadline);
+    RUN_TEST(test_far_deadlines_do_not_wrap);
+#ifdef NDEBUG
+    RUN_TEST(test_in_fiber_api_off_loop_thread);
+#endif
     RUN_TEST(test_yield_spin_lets_timer_fire);
     RUN_TEST(test_pingpong_does_not_starve_io);
     RUN_TEST(test_post_backpressure);

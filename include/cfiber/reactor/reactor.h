@@ -134,8 +134,12 @@ CFIBER_EXPORT int cfiber_reactor_run(cfiber_reactor_t* r) __attribute__((nonnull
 
 /**
  * @brief Wakes a fiber parked in cfiber_ev_wait_async().
- * @details Thread-safe. The parked fiber resumes with CFIBER_EV_READY. A no-op
- *          if the handle is stale or the fiber is not parked async.
+ * @details Thread-safe. The parked fiber resumes with CFIBER_EV_READY. A wake
+ *          that arrives while the fiber is running, ready, or parked on a
+ *          descriptor or timer does not disturb that wait; it is kept, and the
+ *          fiber's next cfiber_ev_wait_async() returns CFIBER_EV_READY at once.
+ *          Wakes do not accumulate: several before a wait count as one. A
+ *          no-op on a stale handle.
  * @return false with errno == EAGAIN if the command could not be queued: the
  *         bounded command ring is full because the loop is not draining it
  *         (not running, or inside a fiber that never yields). Nothing is
@@ -148,13 +152,17 @@ CFIBER_EXPORT bool cfiber_reactor_wake(cfiber_reactor_t* r, cfiber_reactor_handl
  * @details Thread-safe. A fiber parked in any cfiber_ev_* wait resumes with
  *          CFIBER_EV_CANCELLED (an in-flight transport helper returns -1 with
  *          errno == ECANCELED). A no-op if the handle is stale or the fiber is
- *          not currently parked.
+ *          not currently parked; unlike a wake, a cancel is not remembered.
  * @return As cfiber_reactor_wake().
  */
 CFIBER_EXPORT bool cfiber_reactor_cancel(cfiber_reactor_t* r, cfiber_reactor_handle_t h) __attribute__((nonnull(1)));
 
 /* ============================================================================
  * In-fiber API (implicit current reactor; call only from a fiber)
+ *
+ * Called off the loop thread these assert in debug builds; in release builds
+ * they fail with errno == EINVAL (CFIBER_EV_ERROR, -1 or false), or are no-ops
+ * where there is nothing to return.
  * ============================================================================ */
 
 /** @brief Spawns a fiber on the running reactor. @see cfiber_reactor_spawn. */
@@ -200,7 +208,9 @@ CFIBER_EXPORT cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int6
 
 /**
  * @brief Parks the fiber for @p ns nanoseconds.
- * @return CFIBER_EV_TIMEOUT on normal elapse, or CFIBER_EV_CANCELLED.
+ * @return CFIBER_EV_TIMEOUT on normal elapse, or CFIBER_EV_CANCELLED. A wake
+ *         does not cut a sleep short. Deadlines saturate: a value that would
+ *         overflow the clock never elapses.
  */
 CFIBER_EXPORT cfiber_ev_status_t cfiber_ev_sleep(uint64_t ns);
 
@@ -208,13 +218,16 @@ CFIBER_EXPORT cfiber_ev_status_t cfiber_ev_sleep(uint64_t ns);
  * @brief Parks the fiber until woken (cfiber_reactor_wake), the timeout elapses,
  *        or it is cancelled, without any descriptor.
  * @param timeout_ns Deadline in nanoseconds from now, or negative for none.
+ * @return CFIBER_EV_READY at once if a wake arrived since the last call.
  */
 CFIBER_EXPORT cfiber_ev_status_t cfiber_ev_wait_async(int64_t timeout_ns);
 
 /* ---- POSIX byte-stream transport helpers (layered over cfiber_ev_wait) ----
  * Same return conventions as the underlying syscalls. On cancellation they
- * return -1 with errno == ECANCELED; the _timed variants return -1 with
- * errno == ETIMEDOUT when their deadline elapses first. */
+ * return -1 with errno == ECANCELED; the _timed variants take a total deadline
+ * for the whole call, however many partial transfers it takes, and return -1
+ * with errno == ETIMEDOUT when it elapses. A write that returns 0 for a
+ * non-empty buffer is reported as -1 with errno == EIO. */
 
 CFIBER_EXPORT ssize_t cfiber_ev_read(int fd, void* buf, size_t n);
 CFIBER_EXPORT ssize_t cfiber_ev_write(int fd, const void* buf, size_t n);
