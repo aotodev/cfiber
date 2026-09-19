@@ -6,7 +6,7 @@
 
 fiber_prologue:
     # r12 = user_data, rbx = user_func (set by init_fiber)
-#if defined(__SANITIZE_ADDRESS__)
+#if CFIBER_ASAN_ENABLED
     # Issue the finish_switch_fiber that pairs with the scheduler's
     # start_switch_fiber when entering this fresh stack. rbx/r12 are
     # callee-saved and survive the call; rdi is loaded afterwards.
@@ -18,3 +18,5 @@ fiber_prologue:
     ud2                    // should not reach
 
 .size fiber_prologue, .-fiber_prologue
+
+.section .note.GNU-stack, "", @progbits

@@ -5,6 +5,11 @@ Two complementary tools, chosen by target rather than by taste:
 exist. They are mutually exclusive and the combination is rejected at configure
 time, because the canary word would land inside the ASan redzone.
 
+The sanitizer hooks are gated by build definitions, `CFIBER_ASAN_ENABLED` and
+`CFIBER_TSAN_ENABLED`, set by the corresponding CMake options for C and
+assembly alike, rather than by compiler-detection macros. Compiling the library
+with `-fsanitize=address` by hand, without `CFIBER_ASAN=ON`, is rejected.
+
 ## AddressSanitizer (hosted)
 
 `CFIBER_ASAN=ON` builds the library, and via PUBLIC usage requirements the
@@ -113,5 +118,15 @@ points at the first thing that went wrong.
 
 `CFIBER_TSAN=ON`, hosted x86_64, excludes `CFIBER_ASAN` and `CFIBER_FUZZ`. It
 exists for the [reactor](reactor.md), whose cross-thread wake/cancel ring and
-eventfd wakeup are the only concurrent code in the project. The single-threaded
-core has nothing for TSan to find.
+eventfd wakeup are the only concurrent code in the project. The flags go on the
+reactor target and its dependents; the core library is not instrumented.
+
+TSan follows the stack pointer, so a context switch it is not told about
+interleaves the shadow stacks of different fibers and misattributes reports.
+The reactor gives every fiber a TSan context and announces each switch through
+[include/cfiber/debug/tsan.h](../include/cfiber/debug/tsan.h), the TSan
+counterpart of `asan.h`: `cfiber_tsan_create` / `_destroy` per fiber and
+`cfiber_tsan_switch_to` immediately before every switch, in both directions.
+All of it compiles to nothing unless `CFIBER_TSAN_ENABLED` is defined, which the
+`CFIBER_TSAN` option does. Running the built-in scheduler under TSan is not
+supported.

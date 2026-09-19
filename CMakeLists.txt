@@ -157,6 +157,8 @@ if(CFIBER_ASAN)
         $<$<COMPILE_LANGUAGE:C>:-fno-omit-frame-pointer>
     )
     target_link_options(cfiber PUBLIC -fsanitize=address)
+    # One gate for C and assembly: the prologue and cfiber/debug/asan.h must agree.
+    target_compile_definitions(cfiber PUBLIC CFIBER_ASAN_ENABLED=1)
 
     # PUBLIC: the layout must match in any consumer including cfiber/debug/asan.h.
     if(CFIBER_ASAN_REDZONE)
@@ -241,6 +243,7 @@ if(CFIBER_FUZZ)
         $<$<COMPILE_LANGUAGE:C>:-fno-omit-frame-pointer>
     )
     target_link_options(cfiber PUBLIC -fsanitize=address,undefined)
+    target_compile_definitions(cfiber PUBLIC CFIBER_ASAN_ENABLED=1)
 endif()
 
 # ---------------------------------------------------------------------------------------
@@ -347,6 +350,7 @@ if(CFIBER_REACTOR)
             $<$<COMPILE_LANGUAGE:C>:-fno-omit-frame-pointer>
         )
         target_link_options(cfiber_reactor PUBLIC -fsanitize=thread)
+        target_compile_definitions(cfiber_reactor PUBLIC CFIBER_TSAN_ENABLED=1)
     endif()
 endif()
 

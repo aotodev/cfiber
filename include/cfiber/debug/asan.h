@@ -28,6 +28,12 @@
  * @note When ASan is not enabled every entry point degrades to a zero-overhead
  *       inline that simply forwards to switch_context(), so callers need no
  *       conditional compilation of their own.
+ *
+ * @note The gate is CFIBER_ASAN_ENABLED, defined by the build (CFIBER_ASAN and
+ *       CFIBER_FUZZ) for C and assembly alike, so this header and the fiber
+ *       prologue in `.S` cannot disagree on whether the switch annotations are
+ *       issued. It is not derived from the compiler's own macros, which some
+ *       toolchains do not define for assembler-with-cpp.
  */
 
 #ifndef CFIBER_DEBUG_ASAN_H
@@ -38,18 +44,20 @@
 
 #include <stddef.h>
 
-/* GCC and modern Clang define __SANITIZE_ADDRESS__ for -fsanitize=address.
- * Older Clang only exposes it through __has_feature(address_sanitizer). */
-#if defined(__SANITIZE_ADDRESS__)
-#define CFIBER_ASAN_ENABLED 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define CFIBER_ASAN_ENABLED 1
-#endif
-#endif
-
 #ifndef CFIBER_ASAN_ENABLED
 #define CFIBER_ASAN_ENABLED 0
+#endif
+
+/* Instrumented without the gate: the C side would skip the switch annotations
+ * while ASan tracks the stack swaps anyway. Configure with CFIBER_ASAN=ON. */
+#if !CFIBER_ASAN_ENABLED
+#if defined(__SANITIZE_ADDRESS__)
+#error "AddressSanitizer is on but CFIBER_ASAN_ENABLED is not defined; build with CFIBER_ASAN=ON"
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#error "AddressSanitizer is on but CFIBER_ASAN_ENABLED is not defined; build with CFIBER_ASAN=ON"
+#endif
+#endif
 #endif
 
 #ifdef __cplusplus
