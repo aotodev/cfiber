@@ -7,7 +7,7 @@
 Checks: '-*,bugprone-*,cert-*,clang-analyzer-*,concurrency-*,misc-*,performance-*,portability-*,readability-*,-bugprone-easily-swappable-parameters,-bugprone-assignment-in-if-condition,-bugprone-macro-parentheses,-clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,-misc-include-cleaner,-misc-no-recursion,-misc-unused-parameters,-performance-no-int-to-ptr,-readability-implicit-bool-conversion,-readability-magic-numbers,-readability-identifier-length,-readability-function-cognitive-complexity,-readability-isolate-declaration,-readability-uppercase-literal-suffix,-cert-dcl16-c,-cert-err33-c'
 
 WarningsAsErrors: ''
-HeaderFilterRegex: '^(src|include|tests|sample)/'
+HeaderFilterRegex: '^(src|include|tests|examples|fuzz)/'
 FormatStyle: file
 ...
 
