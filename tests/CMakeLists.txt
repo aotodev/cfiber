@@ -5,7 +5,9 @@ include(arm_executable)
 # ======================================================================================
 add_library(cfiber_test STATIC test/test.c)
 target_include_directories(cfiber_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cfiber_test PUBLIC project_flags)
+# cfiber: the framework follows the library's hosted/freestanding split
+# (CFIBER_FREESTANDING) for its fork-based death helper.
+target_link_libraries(cfiber_test PUBLIC cfiber project_flags)
 
 # add_test() can only run the binary on the build host, so register CTest cases
 # only for native builds. Cross-compiled targets (arm, aarch64) are run through
