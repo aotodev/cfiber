@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: ghcr.io/aotodev/cfiber-ci@sha256:bfce13eaad965b4a0b445f55c5fa1093aa7efb3c6edb1302fd052678e528eb16
+      image: ghcr.io/aotodev/cfiber-ci@sha256:cd13edcbbd67802d1ca1bd120e9dfde573f04a6b0a1155dc4d438ab956104ab0
     strategy:
       fail-fast: false
       matrix:
@@ -70,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: ghcr.io/aotodev/cfiber-ci@sha256:bfce13eaad965b4a0b445f55c5fa1093aa7efb3c6edb1302fd052678e528eb16
+      image: ghcr.io/aotodev/cfiber-ci@sha256:cd13edcbbd67802d1ca1bd120e9dfde573f04a6b0a1155dc4d438ab956104ab0
     name: "x86_64 (ctest)"
     steps:
       - uses: actions/checkout@v4
@@ -79,11 +79,21 @@ jobs:
           cmake -B build -DCFIBER_BUILD_EXAMPLES=ON -DCFIBER_BUILD_TESTS=ON -DCFIBER_REACTOR=ON
           cmake --build build -j
           ctest --test-dir build --output-on-failure
-      # An out-of-tree consumer against the staged install: find_package + version header.
-      - name: Install and build a consumer
+      # Out-of-tree consumers against staged installs: find_package, then the plain
+      # compiler + pkg-config route, then the shared library at run time.
+      - name: Install and build consumers
         run: |
           cmake --install build --prefix "$PWD/stage"
           cmake -S tests/consumer -B build-consumer -DCMAKE_PREFIX_PATH="$PWD/stage"
           cmake --build build-consumer
           ./build-consumer/consumer
-          grep -q '^Libs: ' stage/lib/pkgconfig/cfiber.pc
+          export PKG_CONFIG_PATH="$PWD/stage/lib/pkgconfig"
+          cc -std=c23 $(pkg-config --cflags cfiber) tests/consumer/consumer.c $(pkg-config --libs cfiber) -o consumer-pc
+          ./consumer-pc
+          cmake -B build-shared -DCFIBER_BUILD_SHARED=ON -DCFIBER_REACTOR=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-shared -j
+          cmake --install build-shared --prefix "$PWD/stage-shared"
+          cmake -S tests/consumer -B build-consumer-shared -DCMAKE_PREFIX_PATH="$PWD/stage-shared"
+          cmake --build build-consumer-shared
+          LD_LIBRARY_PATH="$PWD/stage-shared/lib" ./build-consumer-shared/consumer
+          ldd build-consumer-shared/consumer | grep -q 'libcfiber\.so\.0'
