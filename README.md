@@ -134,6 +134,7 @@ guarantee. Details in [docs/testing.md](docs/testing.md).
 - [Testing](docs/testing.md): what the suites and fuzzers cover.
 - [Building](docs/building.md): CMake options, cross builds, consuming cfiber from another project.
 - [Layout](docs/layout.md): source tree, header conventions, per-architecture assembly.
+- [Style](docs/style.md): naming, header and error contracts, comments, tests, commits.
 
 ## License
 
