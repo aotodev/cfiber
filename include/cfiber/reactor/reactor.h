@@ -119,11 +119,12 @@ cfiber_reactor_spawn(cfiber_reactor_t* r, cfiber_reactor_fn fn, void* arg, cfibe
  * @details Registers the reactor's fiber-return hook for the duration of the
  *          call and restores the previous hook on return. Blocks the calling
  *          thread. May be called again after it returns, e.g. to run fibers
- *          spawned in between.
+ *          spawned in between, and from inside a fiber of another scheduler
+ *          or reactor, whose own becomes current again on return.
  * @return 0 when every fiber has completed; -1 with errno set if the loop
- *         stopped early (the poller failed, or a reactor is already running on
- *         this thread: EBUSY). Fibers still live after a failure are torn down
- *         by cfiber_reactor_destroy().
+ *         stopped early (the poller failed, or the reactor was run from one of
+ *         its own fibers: EBUSY). Fibers still live after a failure are torn
+ *         down by cfiber_reactor_destroy().
  */
 CFIBER_EXPORT int cfiber_reactor_run(cfiber_reactor_t* r) __attribute__((nonnull(1)));
 

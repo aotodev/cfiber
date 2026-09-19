@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 /* Generous per-fiber stack: these fibers do little, but ASan / deep ABI
  * prologues appreciate the headroom. */
@@ -366,6 +367,94 @@ static int test_scheduler_no_leak_via_counting_allocator(void) {
 }
 
 /* ============================================================================
+ * nested and sequential schedulers
+ * ============================================================================ */
+
+typedef struct {
+    cfiber_scheduler_t outer;
+    cfiber_scheduler_t inner;
+    cfiber_scheduler_t* seen_in_inner;    /* current() inside the inner fiber */
+    cfiber_scheduler_t* seen_after_run;   /* current() after the nested run */
+    cfiber_scheduler_t* seen_after_yield; /* current() after yielding on the outer */
+    int inner_ran;
+    bool inner_init_ok;
+} nested_state;
+
+static void inner_fiber(void* p) {
+    nested_state* st = p;
+    st->seen_in_inner = cfiber_scheduler_current();
+    st->inner_ran++;
+    cfiber_yield();
+    st->inner_ran++;
+}
+
+static void outer_fiber(void* p) {
+    nested_state* st = p;
+    st->inner_init_ok = cfiber_scheduler_init(&st->inner, (cfiber_scheduler_config_t){.stack_size = STACK_SIZE}) == 0;
+    if (!st->inner_init_ok) {
+        return;
+    }
+    (void)cfiber_scheduler_spawn(&st->inner, inner_fiber, st);
+    (void)cfiber_scheduler_spawn(&st->inner, inner_fiber, st);
+    cfiber_scheduler_run(&st->inner);
+    cfiber_scheduler_destroy(&st->inner);
+
+    st->seen_after_run = cfiber_scheduler_current();
+    cfiber_yield(); /* a real yield: a sibling is ready on the outer */
+    st->seen_after_yield = cfiber_scheduler_current();
+}
+
+static void sibling_fiber(void* p) {
+    (void)p;
+    cfiber_yield();
+}
+
+/* A fiber runs a second scheduler to completion; its own must be current
+ * again afterwards, and a yield on it must work. */
+static int test_nested_scheduler(void) {
+    static nested_state st;
+    memset(&st, 0, sizeof st);
+    ASSERT_EQ_U32(cfiber_scheduler_init(&st.outer, (cfiber_scheduler_config_t){.stack_size = STACK_SIZE}), 0);
+
+    ASSERT_TRUE(cfiber_scheduler_spawn(&st.outer, outer_fiber, &st));
+    ASSERT_TRUE(cfiber_scheduler_spawn(&st.outer, sibling_fiber, nullptr));
+    cfiber_scheduler_run(&st.outer);
+
+    ASSERT_TRUE(st.inner_init_ok);
+    ASSERT_EQ_U32(st.inner_ran, 4);
+    ASSERT_EQ_PTR(st.seen_in_inner, &st.inner);
+    ASSERT_EQ_PTR(st.seen_after_run, &st.outer);
+    ASSERT_EQ_PTR(st.seen_after_yield, &st.outer);
+    ASSERT_NULL(cfiber_scheduler_current());
+
+    cfiber_scheduler_destroy(&st.outer);
+    return 0;
+}
+
+static int test_sequential_schedulers(void) {
+    cfiber_scheduler_t a;
+    cfiber_scheduler_t b;
+    ASSERT_EQ_U32(cfiber_scheduler_init(&a, (cfiber_scheduler_config_t){.stack_size = STACK_SIZE}), 0);
+    ASSERT_EQ_U32(cfiber_scheduler_init(&b, (cfiber_scheduler_config_t){.stack_size = STACK_SIZE}), 0);
+
+    cfiber_scheduler_t* seen_a = nullptr;
+    cfiber_scheduler_t* seen_b = nullptr;
+    ASSERT_TRUE(cfiber_scheduler_spawn(&a, capture_current, &seen_a));
+    cfiber_scheduler_run(&a);
+    ASSERT_NULL(cfiber_scheduler_current());
+    ASSERT_TRUE(cfiber_scheduler_spawn(&b, capture_current, &seen_b));
+    cfiber_scheduler_run(&b);
+    ASSERT_NULL(cfiber_scheduler_current());
+
+    ASSERT_EQ_PTR(seen_a, &a);
+    ASSERT_EQ_PTR(seen_b, &b);
+
+    cfiber_scheduler_destroy(&a);
+    cfiber_scheduler_destroy(&b);
+    return 0;
+}
+
+/* ============================================================================
  * Runner
  * ============================================================================ */
 
@@ -380,6 +469,8 @@ int main(void) {
     RUN_TEST(test_scheduler_single_fiber_yield_is_noop);
     RUN_TEST(test_scheduler_dynamic_spawn);
     RUN_TEST(test_scheduler_current);
+    RUN_TEST(test_nested_scheduler);
+    RUN_TEST(test_sequential_schedulers);
     RUN_TEST(test_scheduler_spawn_fails_when_capacity_exhausted);
     RUN_TEST(test_scheduler_reuse_after_drain);
     RUN_TEST(test_scheduler_no_leak_via_counting_allocator);

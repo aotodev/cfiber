@@ -582,6 +582,65 @@ static int test_run_twice(void) {
 }
 
 /* ============================================================================
+ * nested reactors: a fiber runs a second reactor to completion
+ * ============================================================================ */
+
+typedef struct {
+    cfiber_reactor_t* outer;
+    int inner_rc;   /* run() of the inner reactor */
+    int reentry_rc; /* run() of the outer from its own fiber */
+    int reentry_errno;
+    cfiber_ev_status_t inner_st;    /* a sleep on the inner, from its fiber */
+    cfiber_ev_status_t outer_after; /* a sleep on the outer after the nested run */
+} nested_reactor_state;
+
+static void nested_inner_fiber(void* arg) {
+    nested_reactor_state* st = arg;
+    st->inner_st = cfiber_ev_sleep((uint64_t)ms_to_ns(1));
+}
+
+static void nested_outer_fiber(void* arg) {
+    nested_reactor_state* st = arg;
+
+    st->reentry_rc = cfiber_reactor_run(st->outer);
+    st->reentry_errno = errno;
+
+    cfiber_reactor_t* inner = make_reactor();
+    if (!inner) {
+        return;
+    }
+    (void)cfiber_reactor_spawn(inner, nested_inner_fiber, st, nullptr);
+    st->inner_rc = cfiber_reactor_run(inner);
+    cfiber_reactor_destroy(inner);
+
+    st->outer_after = cfiber_ev_sleep((uint64_t)ms_to_ns(1)); /* needs the outer current again */
+}
+
+static int test_nested_reactor(void) {
+    static nested_reactor_state st;
+    memset(&st, 0, sizeof st);
+    st.inner_rc = -2;
+    st.reentry_rc = -2;
+    st.inner_st = CFIBER_EV_ERROR;
+    st.outer_after = CFIBER_EV_ERROR;
+
+    st.outer = make_reactor();
+    ASSERT_NOT_NULL(st.outer);
+    ASSERT_TRUE(cfiber_reactor_spawn(st.outer, nested_outer_fiber, &st, nullptr));
+
+    ASSERT_EQ_U32(cfiber_reactor_run(st.outer), 0);
+
+    ASSERT_EQ_U32((uint32_t)st.reentry_rc, (uint32_t)-1);
+    ASSERT_EQ_U32(st.reentry_errno, EBUSY);
+    ASSERT_EQ_U32(st.inner_rc, 0);
+    ASSERT_EQ_U32(st.inner_st, CFIBER_EV_TIMEOUT);
+    ASSERT_EQ_U32(st.outer_after, CFIBER_EV_TIMEOUT);
+
+    cfiber_reactor_destroy(st.outer);
+    return 0;
+}
+
+/* ============================================================================
  * loop fairness: yield loops must not starve timers, I/O or commands
  * ============================================================================ */
 
@@ -989,6 +1048,7 @@ int main(void) {
     RUN_TEST(test_destroy_without_run);
     RUN_TEST(test_run_reports_poller_failure);
     RUN_TEST(test_run_twice);
+    RUN_TEST(test_nested_reactor);
     RUN_TEST(test_yield_spin_lets_timer_fire);
     RUN_TEST(test_pingpong_does_not_starve_io);
     RUN_TEST(test_post_backpressure);

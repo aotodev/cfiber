@@ -179,8 +179,14 @@ bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, fiber_fn func, void* user
 }
 
 void cfiber_scheduler_run(cfiber_scheduler_t* sched) {
+    ASSERT(s_current_sched != sched && "cfiber_scheduler_run: re-entered on the running scheduler");
+
+    /* Saved and restored like the hook, so a fiber can run another scheduler
+     * to completion and find its own still current afterwards. */
+    cfiber_scheduler_t* const prev_sched = s_current_sched;
     s_current_sched = sched;
     cfiber_return_hook_t prev_hook = cfiber_set_return_hook(builtin_return_hook, sched);
+    const cfiber_asan_host_t prev_host = cfiber_asan_host_begin();
 
     while (sched->active_count > 0) {
         /* Free the zombie from the previous iteration (safe: we are on the
@@ -206,8 +212,9 @@ void cfiber_scheduler_run(cfiber_scheduler_t* sched) {
         sched->zombie = nullptr;
     }
 
+    cfiber_asan_host_end(prev_host);
     cfiber_set_return_hook(prev_hook.fn, prev_hook.ctx);
-    s_current_sched = nullptr;
+    s_current_sched = prev_sched;
 }
 
 /* ============================================================================

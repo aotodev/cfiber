@@ -63,6 +63,11 @@ tree is built without knowing its shape up front. See
 [examples/scheduler/runtime_example.c](../examples/scheduler/runtime_example.c)
 for nested spawns and fibers that spawn other fibers.
 
+`cfiber_scheduler_run()` saves and restores the thread's current scheduler
+along with the fiber-return hook, so a fiber may create another scheduler, run
+it to completion and continue on its own, which is current again. Running a
+scheduler from one of its own fibers is not supported.
+
 ## Bring your own allocator
 
 `cfiber_scheduler_init_ext()` takes an allocation callback, a free callback and
