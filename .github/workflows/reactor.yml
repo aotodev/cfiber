@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
-      image: ghcr.io/aotodev/cfiber-ci@sha256:bfce13eaad965b4a0b445f55c5fa1093aa7efb3c6edb1302fd052678e528eb16
+      image: ghcr.io/aotodev/cfiber-ci@sha256:cd13edcbbd67802d1ca1bd120e9dfde573f04a6b0a1155dc4d438ab956104ab0
     name: "reactor (tsan)"
     env:
       CC: clang
