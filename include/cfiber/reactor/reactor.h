@@ -22,8 +22,16 @@
  *          waits a descriptor may be handed to another fiber. Close a
  *          descriptor another fiber may be parked on with cfiber_ev_close().
  *
- * @note Linux only (epoll, eventfd). Built only when the CFIBER_REACTOR option
- *       is enabled; excluded on freestanding targets.
+ * @section naming Two prefixes
+ *          cfiber_reactor_* functions take the reactor explicitly and are the
+ *          host-side API: lifecycle from the owning thread, wake and cancel
+ *          from any thread. cfiber_ev_* functions are the in-fiber API: they
+ *          act on the reactor running the calling fiber and take no reactor
+ *          argument. Where both exist (spawn, wake, cancel) they do the same
+ *          thing from the two sides.
+ *
+ * @note Linux only (epoll, eventfd, accept4). Built only when the
+ *       CFIBER_REACTOR option is enabled; excluded on freestanding targets.
  *
  * @see docs/reactor.md
  */
@@ -106,9 +114,12 @@ CFIBER_EXPORT cfiber_reactor_t* cfiber_reactor_create(cfiber_reactor_config_t co
 CFIBER_EXPORT void cfiber_reactor_destroy(cfiber_reactor_t* r);
 
 /**
- * @brief Spawns a fiber on @p r before (or during) the run loop.
+ * @brief Spawns a fiber on @p r from the host thread, before
+ *        cfiber_reactor_run() or between runs.
  * @param out_handle If non-NULL, receives a stable handle to the new fiber.
  * @return true on success, false on allocation failure.
+ * @note Not safe against a running loop from another thread; from inside a
+ *       fiber use cfiber_ev_spawn().
  */
 CFIBER_EXPORT bool
 cfiber_reactor_spawn(cfiber_reactor_t* r, cfiber_reactor_fn fn, void* arg, cfiber_reactor_handle_t* out_handle)
@@ -190,11 +201,18 @@ CFIBER_EXPORT void cfiber_ev_cancel(cfiber_reactor_handle_t h);
  */
 CFIBER_EXPORT void cfiber_ev_yield(void);
 
+/** @brief Readiness to wait for in cfiber_ev_wait(); the two combine. */
+typedef enum {
+    CFIBER_EV_IN = 1u << 0,  /**< readable */
+    CFIBER_EV_OUT = 1u << 1, /**< writable */
+} cfiber_ev_direction_t;
+
 /**
  * @brief The core primitive: parks until @p fd is ready, the timeout elapses,
  *        or the fiber is cancelled.
  * @param fd         A non-blocking file descriptor.
- * @param direction  EPOLLIN and/or EPOLLOUT.
+ * @param direction  CFIBER_EV_IN, CFIBER_EV_OUT or both. Any other bit, or
+ *                   none, is CFIBER_EV_ERROR with errno == EINVAL.
  * @param timeout_ns Deadline in nanoseconds from now, or a negative value for no
  *                   timeout.
  * @return One of cfiber_ev_status_t. CFIBER_EV_ERROR with errno == EBUSY if
@@ -227,7 +245,8 @@ CFIBER_EXPORT cfiber_ev_status_t cfiber_ev_wait_async(int64_t timeout_ns);
  * return -1 with errno == ECANCELED; the _timed variants take a total deadline
  * for the whole call, however many partial transfers it takes, and return -1
  * with errno == ETIMEDOUT when it elapses. A write that returns 0 for a
- * non-empty buffer is reported as -1 with errno == EIO. */
+ * non-empty buffer is reported as -1 with errno == EIO. cfiber_ev_accept
+ * returns descriptors that are already non-blocking and close-on-exec. */
 
 CFIBER_EXPORT ssize_t cfiber_ev_read(int fd, void* buf, size_t n);
 CFIBER_EXPORT ssize_t cfiber_ev_write(int fd, const void* buf, size_t n);

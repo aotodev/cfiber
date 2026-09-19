@@ -179,7 +179,7 @@ static int client_upgrade(int fd, const char* path, char* resp, size_t cap) {
 static void client_fiber(void* arg) {
     (void)arg;
     int fd = client_connect(PORT);
-    CHECK(fd >= 0, "client connected (cfiber_ev_connect parked on EPOLLOUT, then resumed)");
+    CHECK(fd >= 0, "client connected (cfiber_ev_connect parked until writable, then resumed)");
     if (fd < 0) {
         return;
     }
