@@ -16,13 +16,18 @@ touched, which is what keeps the saved context small:
 
 | Target | Saved | Notes |
 | ------ | ----- | ----- |
-| x86_64 | `rsp`, `rbx`, `rbp`, `r12`-`r15` | System V AMD64 |
-| AArch64 | `sp`, `x19`-`x30`, low 64 bits of `v8`-`v15` | AAPCS64 |
+| x86_64 | `rsp`, `rbx`, `rbp`, `r12`-`r15`, `MXCSR`, x87 control word | System V AMD64 |
+| AArch64 | `sp`, `x19`-`x30`, low 64 bits of `v8`-`v15`, `FPCR` | AAPCS64 |
 | ARM Cortex-M | `sp`, `r4`-`r11`, `lr` | AAPCS, Thumb-1 and Thumb-2 |
-| Cortex-M4F / M7F | the above plus `s16`-`s31` | when built for an FPU (`__ARM_FP`), `softfp` or `hard` |
+| Cortex-M4F / M7F | the above plus `s16`-`s31`, `FPSCR` | when built for an FPU (`__ARM_FP`), `softfp` or `hard` |
 
 The FPU half of the Cortex-M context is conditional, so a soft-float build pays
 nothing for registers it does not have.
+
+The floating-point control state is part of the context on every target, as
+the ABIs require of a callee: a fiber that changes the rounding mode or the
+exception masks keeps that change to itself, and a new fiber starts with its
+creator's settings, as a new thread would.
 
 ## Starting a fiber
 

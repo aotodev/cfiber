@@ -12,6 +12,9 @@ switch_context:
     mov     [rdi + 0x20], r12
     mov     [rdi + 0x28], rbx
     mov     [rdi + 0x30], rbp
+    # FP control state: callee-saved by the System V ABI
+    stmxcsr [rdi + 0x38]
+    fnstcw  [rdi + 0x3c]
 
     # Load new context (second parameter in %rsi)
     mov     rsp, [rsi + 0x00]
@@ -21,6 +24,8 @@ switch_context:
     mov     r12, [rsi + 0x20]
     mov     rbx, [rsi + 0x28]
     mov     rbp, [rsi + 0x30]
+    ldmxcsr [rsi + 0x38]
+    fldcw   [rsi + 0x3c]
 
     ret
 

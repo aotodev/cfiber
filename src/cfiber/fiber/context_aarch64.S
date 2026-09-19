@@ -33,6 +33,10 @@ switch_context:
     stp d12, d13, [x0, #136]
     stp d14, d15, [x0, #152]
 
+    # Save the FP control register (rounding mode, trap enables)
+    mrs x2, fpcr
+    str x2, [x0, #168]
+
     #----------------------------------------------------------------------------#
     # 2) Load new context from new (x1)                                          #
     #----------------------------------------------------------------------------#
@@ -53,6 +57,10 @@ switch_context:
     ldp d10, d11, [x1, #120]
     ldp d12, d13, [x1, #136]
     ldp d14, d15, [x1, #152]
+
+    # Load the FP control register
+    ldr x2, [x1, #168]
+    msr fpcr, x2
 
     # Load frame pointer (x29)
     ldr x29, [x1, #88]

@@ -33,9 +33,11 @@ typedef uint16_t word_t;
 
 /**
  * @brief x86_64 context structure.
- * @details Stores callee-saved registers according to the System V AMD64 ABI.
- *          Caller-saved registers (rax, rcx, rdx, rsi, rdi, r8-r11) are saved
- *          by the caller and not preserved here.
+ * @details Stores callee-saved registers according to the System V AMD64 ABI,
+ *          including the floating-point control state (MXCSR control bits and
+ *          the x87 control word), so a fiber's rounding mode and exception
+ *          masks stay with the fiber. Caller-saved registers (rax, rcx, rdx,
+ *          rsi, rdi, r8-r11) are saved by the caller and not preserved here.
  */
 typedef struct {
     /** Stack pointer. */
@@ -52,6 +54,10 @@ typedef struct {
     uint64_t rbx;
     /** Frame pointer (base pointer). */
     uint64_t rbp;
+    /** SSE control and status register. */
+    uint32_t mxcsr;
+    /** x87 FPU control word. */
+    uint16_t x87_cw;
 } __attribute__((packed, aligned(DEFAULT_ALIGMENT))) context_t;
 
 /* ============================================================================
@@ -65,8 +71,9 @@ typedef uint32_t word_t;
 /**
  * @brief AArch64 context structure.
  * @details Stores callee-saved registers according to AAPCS64: general purpose
- *          registers x19-x30 plus the lower 64 bits of v8-v15. Caller-saved
- *          registers (x0-x18) are not preserved as per the calling convention.
+ *          registers x19-x30, the lower 64 bits of v8-v15 and the FPCR, so a
+ *          fiber's rounding mode stays with the fiber. Caller-saved registers
+ *          (x0-x18) are not preserved as per the calling convention.
  */
 typedef struct {
     /** Stack pointer. */
@@ -105,6 +112,9 @@ typedef struct {
     double v13;
     double v14;
     double v15;
+
+    /** Floating-point control register (rounding mode, trap enables). */
+    uint64_t fpcr;
 } __attribute__((packed, aligned(DEFAULT_ALIGMENT))) context_t;
 
 /* ============================================================================
@@ -122,9 +132,10 @@ typedef uint32_t word_t;
  *
  *          For Cortex-M4F/M7F with FPU:
  *            - When the compiler targets an FPU (__ARM_FP, set by -mfpu with
- *              -mfloat-abi=softfp or hard), s16-s31 are saved as well.
+ *              -mfloat-abi=softfp or hard), s16-s31 and the FPSCR are saved
+ *              as well, so a fiber's rounding mode stays with the fiber.
  *            - Registers s0-s15 are caller-saved and not preserved.
- *            - FPU context adds 64 bytes to context size.
+ *            - FPU context adds 68 bytes to context size.
  *
  *          The layout follows the compile flags, so the library and its
  *          consumers must agree on -mfloat-abi and -mfpu.
@@ -171,6 +182,8 @@ typedef struct {
     float s29;
     float s30;
     float s31;
+    /** Floating-point status and control register. */
+    uint32_t fpscr;
 #endif
 } __attribute__((packed, aligned(DEFAULT_ALIGMENT))) context_t;
 

@@ -40,7 +40,7 @@ else()
 endif()
 
 target_include_directories(${_cfiber_test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(${_cfiber_test_name} PRIVATE cfiber cfiber_test project_flags)
+target_link_libraries(${_cfiber_test_name} PRIVATE cfiber cfiber_test project_flags m) # m: fenv
 
 if(_cfiber_register_ctest)
     add_test(NAME context_switch COMMAND ${_cfiber_test_name})

@@ -15,15 +15,26 @@
  * alone cannot: save r12 into r13's slot, restore r12 from r13's slot, and the
  * round trip still passes.
  *
+ * The FP control state (rounding mode) is checked the same way through fenv:
+ * each fiber sets its own mode around the switch and reads it back after.
+ *
  * Fibers only record into the fixture; main asserts once control is back.
  */
 
 #include "cfiber/fiber/fiber.h"
 #include "test/test.h"
 
+#include <fenv.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Soft-float Cortex-M has no rounding mode to preserve; fenv is a stub there. */
+#if !defined(__arm__) || defined(__ARM_FP)
+#define HAVE_FP_CONTROL 1
+#else
+#define HAVE_FP_CONTROL 0
+#endif
 
 /* ============================================================================
  * Per-architecture callee-saved set. Slot order must match switch_regs_<arch>.S.
@@ -216,6 +227,11 @@ typedef struct {
     uintptr_t saved_b[REG_COUNT];
     uintptr_t saved_sp_a;
     uintptr_t saved_sp_b;
+
+    /* rounding mode seen at each step (fegetround) */
+    int round_in_intermediary; /* while the test fiber holds FE_UPWARD */
+    int round_after_resume;    /* back in the test fiber; intermediary set FE_DOWNWARD */
+    int round_in_main;         /* after the run: main never changed its own */
 } fixture;
 
 static fixture fx;
@@ -267,7 +283,9 @@ void cfiber_test_fiber_main(void* user_data, uintptr_t entry_sp) {
     f->entry_sp = entry_sp;
     trace_push(f, STEP_TEST_ENTER);
 
+    (void)fesetround(FE_UPWARD);
     cfiber_test_switch_regs(&f->test_fiber.ctx, &f->intermediary.ctx, f->magic_a, f->out_a);
+    f->round_after_resume = fegetround();
 
     trace_push(f, STEP_TEST_RESUME);
     ctx_regs(&f->intermediary.ctx, f->saved_b);
@@ -282,6 +300,8 @@ static void intermediary_main(void* user_data) {
     ctx_regs(&f->test_fiber.ctx, f->saved_a);
     f->saved_sp_a = ctx_sp(&f->test_fiber.ctx);
 
+    f->round_in_intermediary = fegetround(); /* inherited from main at init */
+    (void)fesetround(FE_DOWNWARD);
     cfiber_test_switch_regs(&f->intermediary.ctx, &f->test_fiber.ctx, f->magic_b, f->out_b);
     /* not resumed */
 }
@@ -299,6 +319,7 @@ static int test_round_trip(void) {
     ASSERT_TRUE(setup_fiber(&fx.intermediary, intermediary_main));
 
     switch_context(&fx.main_ctx, &fx.test_fiber.ctx);
+    fx.round_in_main = fegetround();
     return 0;
 }
 
@@ -355,6 +376,17 @@ static int test_saved_stack_pointer(void) {
     return 0;
 }
 
+#if HAVE_FP_CONTROL
+/* The rounding mode is per fiber: a new fiber inherits its creator's, a
+ * switch neither leaks nor loses a change. */
+static int test_fp_control_preserved(void) {
+    ASSERT_EQ_U32(fx.round_in_intermediary, FE_TONEAREST);
+    ASSERT_EQ_U32(fx.round_after_resume, FE_UPWARD);
+    ASSERT_EQ_U32(fx.round_in_main, FE_TONEAREST);
+    return 0;
+}
+#endif
+
 int main(void) {
     cfiber_test_suite_begin("context switch / register preservation");
 
@@ -366,6 +398,9 @@ int main(void) {
     RUN_TEST(test_registers_restored);
     RUN_TEST(test_registers_saved);
     RUN_TEST(test_saved_stack_pointer);
+#if HAVE_FP_CONTROL
+    RUN_TEST(test_fp_control_preserved);
+#endif
 
     teardown_fiber(&fx.test_fiber);
     teardown_fiber(&fx.intermediary);
