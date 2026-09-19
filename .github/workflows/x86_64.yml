@@ -55,11 +55,9 @@ jobs:
           - name: stack-sanitizer
             cc: gcc
             args: "-t -e -d --sanitizer"
-          # No -t: the whitebox tests use internal symbols a shared library does
-          # not export. The examples link the public API, so they catch that.
           - name: shared
             cc: gcc
-            args: "-e --shared --reactor"
+            args: "-t -e --shared --reactor"
     name: "x86_64 (${{ matrix.name }})"
     env:
       CC: ${{ matrix.cc }}

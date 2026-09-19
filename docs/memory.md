@@ -58,9 +58,7 @@ sanitizer is enabled it is also where the canary is planted and the watermark
 pattern written, so instrumentation costs the caller nothing at the call site.
 
 This is the only stack allocator available on freestanding targets, and the one
-the built-in scheduler uses everywhere. Note that `ms_stack_alloc()` and
-`ms_stack_release()` carry no `CFIBER_EXPORT`, so calling them directly works
-against a static build but not a shared one; see [layout.md](layout.md).
+the built-in scheduler uses everywhere.
 
 ## Growable stacks (hosted)
 

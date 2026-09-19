@@ -23,15 +23,21 @@ extern "C" {
  * @param stack Output descriptor filled on success.
  * @param ms    The multislab to allocate from.
  * @return 0 on success, -1 if the multislab is exhausted.
+ * @details With the stack sanitizer, plants the canary and paints the
+ *          watermark. Under ASan, poisons CFIBER_ASAN_REDZONE bytes at
+ *          mem_base; the usable stack starts above them.
  */
-int ms_stack_alloc(cstack_t* stack, multislab_t* ms);
+[[nodiscard]] CFIBER_EXPORT int ms_stack_alloc(cstack_t* stack, multislab_t* ms) __attribute__((nonnull(1, 2)));
 
 /**
  * @brief Release a fixed-size stack back to a multislab.
  * @param stack The stack descriptor to release.
  * @param ms    The multislab the stack was allocated from.
+ * @return false if the stack sanitizer found the stack overflowed (canary gone
+ *         or watermark exhausted), in every build type; the block is released
+ *         regardless. Always true without the sanitizer.
  */
-void ms_stack_release(cstack_t* stack, multislab_t* ms);
+CFIBER_EXPORT bool ms_stack_release(cstack_t* stack, multislab_t* ms) __attribute__((nonnull(1, 2)));
 
 #ifdef __cplusplus
 }

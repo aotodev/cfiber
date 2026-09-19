@@ -16,6 +16,7 @@
  */
 
 #include "cfiber/scheduler/scheduler.h"
+#include "cfiber/stack/debug/stack_sanitize.h"
 #include "test/test.h"
 
 #include <stddef.h>
@@ -455,6 +456,39 @@ static int test_sequential_schedulers(void) {
 }
 
 /* ============================================================================
+ * stack sanitizer: scheduler fibers are instrumented
+ * ============================================================================ */
+
+#if CFIBER_STACK_SANITIZER
+#define DEEP_FRAME 2048
+
+static void deep_frame_fiber(void* p) {
+    (void)p;
+    volatile uint8_t frame[DEEP_FRAME];
+    for (size_t i = 0; i < sizeof frame; i++) {
+        frame[i] = (uint8_t)i;
+    }
+}
+
+static int test_scheduler_reports_stack_peak(void) {
+    cfiber_scheduler_t sched;
+    ASSERT_EQ_U32(cfiber_scheduler_init(&sched, (cfiber_scheduler_config_t){.stack_size = STACK_SIZE}), 0);
+    ASSERT_EQ_U64(cfiber_scheduler_stack_peak(&sched), 0);
+
+    ASSERT_TRUE(cfiber_scheduler_spawn(&sched, deep_frame_fiber, nullptr));
+    cfiber_scheduler_run(&sched);
+
+    /* the frame plus the prologue's own use, well inside the stack */
+    const size_t peak = cfiber_scheduler_stack_peak(&sched);
+    ASSERT_TRUE(peak >= DEEP_FRAME);
+    ASSERT_TRUE(peak < STACK_SIZE);
+
+    cfiber_scheduler_destroy(&sched);
+    return 0;
+}
+#endif
+
+/* ============================================================================
  * Runner
  * ============================================================================ */
 
@@ -474,6 +508,9 @@ int main(void) {
     RUN_TEST(test_scheduler_spawn_fails_when_capacity_exhausted);
     RUN_TEST(test_scheduler_reuse_after_drain);
     RUN_TEST(test_scheduler_no_leak_via_counting_allocator);
+#if CFIBER_STACK_SANITIZER
+    RUN_TEST(test_scheduler_reports_stack_peak);
+#endif
 
     return cfiber_test_report();
 }
