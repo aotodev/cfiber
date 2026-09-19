@@ -13,11 +13,13 @@
 #include <stddef.h>
 
 /*
- * Spawn a listener fiber on `r`, bound to 127.0.0.1:`port`. It accepts
- * connections and spawns one echo fiber per connection.
+ * Bind 127.0.0.1:`port` (0 for an ephemeral port), listen, and spawn a
+ * listener fiber on `r` that accepts connections and spawns one echo fiber per
+ * connection. Binding happens here, so the returned port is usable at once.
  *
  * If max_conns > 0 the listener exits after that many connections (the self-test
- * uses this for a clean shutdown); 0 serves forever. Returns 0 on success.
+ * uses this for a clean shutdown); 0 serves forever. Returns the bound port, or
+ * -1 with errno set.
  */
 int ws_serve(cfiber_reactor_t* r, int port, int max_conns);
 
