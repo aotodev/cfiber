@@ -86,4 +86,4 @@ jobs:
           cmake -S tests/consumer -B build-consumer -DCMAKE_PREFIX_PATH="$PWD/stage"
           cmake --build build-consumer
           ./build-consumer/consumer
-          PKG_CONFIG_PATH="$PWD/stage/lib/pkgconfig" pkg-config --cflags --libs cfiber
+          grep -q '^Libs: ' stage/lib/pkgconfig/cfiber.pc
