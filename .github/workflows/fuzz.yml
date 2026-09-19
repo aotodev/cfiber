@@ -39,7 +39,7 @@ jobs:
       - name: Build fuzzers
         run: |
           CC=clang cmake -G Ninja -B build-fuzz \
-            -DBUILD_TESTS=ON -DCFIBER_FUZZ=ON -DCFIBER_REACTOR=ON \
+            -DCFIBER_BUILD_TESTS=ON -DCFIBER_FUZZ=ON -DCFIBER_REACTOR=ON \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo
           cmake --build build-fuzz -j
       - name: Smoke-run fuzzers
