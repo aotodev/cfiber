@@ -228,6 +228,11 @@ typedef struct {
     uintptr_t saved_sp_a;
     uintptr_t saved_sp_b;
 
+    /* return hook: a fiber whose function returns lands in the epilogue */
+    fiber_t returning;
+    int hook_calls;
+    void* hook_ctx;
+
     /* rounding mode seen at each step (fegetround) */
     int round_in_intermediary; /* while the test fiber holds FE_UPWARD */
     int round_after_resume;    /* back in the test fiber; intermediary set FE_DOWNWARD */
@@ -250,11 +255,18 @@ static void fill_pattern(uintptr_t out[REG_COUNT], uintptr_t seed) {
     }
 }
 
-/* The fibers never return: the test fiber switches back to main and the
- * intermediary is left parked. Registered to exercise the API only. */
-static void noop_return_hook(void* ctx) {
-    (void)ctx;
-    __builtin_unreachable();
+/* Fiber-return hook: runs on the returning fiber's stack and must not return.
+ * Records the call and hands control back to main. */
+static void return_hook(void* ctx) {
+    fixture* f = ctx;
+    f->hook_calls++;
+    f->hook_ctx = ctx;
+    switch_context(&f->returning.ctx, &f->main_ctx);
+    abort(); /* a hook must never be resumed */
+}
+
+static void returning_main(void* user_data) {
+    (void)user_data; /* returns: the epilogue must call the hook */
 }
 
 static bool setup_fiber(fiber_t* fiber, fiber_fn fn) {
@@ -338,6 +350,17 @@ static int test_round_trip(void) {
     } while (0)
 
 /* Full-descending stack: an empty one has sp at the top boundary. */
+/* A fiber function that returns reaches the epilogue, which invokes the hook
+ * registered with cfiber_set_return_hook() with its context. */
+static int test_return_hook_invoked(void) {
+    ASSERT_TRUE(setup_fiber(&fx.returning, returning_main));
+    switch_context(&fx.main_ctx, &fx.returning.ctx);
+    ASSERT_EQ_U32(fx.hook_calls, 1);
+    ASSERT_EQ_PTR(fx.hook_ctx, &fx);
+    teardown_fiber(&fx.returning);
+    return 0;
+}
+
 static bool within_stack(const fiber_t* fiber, uintptr_t sp) {
     const uintptr_t base = (uintptr_t)fiber->stack;
     return sp >= base && sp <= base + fiber->stack_size;
@@ -390,7 +413,7 @@ static int test_fp_control_preserved(void) {
 int main(void) {
     cfiber_test_suite_begin("context switch / register preservation");
 
-    cfiber_set_return_hook(noop_return_hook, nullptr);
+    cfiber_set_return_hook(return_hook, &fx);
 
     RUN_TEST(test_round_trip);
     RUN_TEST(test_execution_order);
@@ -401,6 +424,7 @@ int main(void) {
 #if HAVE_FP_CONTROL
     RUN_TEST(test_fp_control_preserved);
 #endif
+    RUN_TEST(test_return_hook_invoked);
 
     teardown_fiber(&fx.test_fiber);
     teardown_fiber(&fx.intermediary);

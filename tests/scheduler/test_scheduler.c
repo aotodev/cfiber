@@ -34,14 +34,16 @@
 
 typedef struct {
     int seq[32];
-    int len;
+    int len;       /* never exceeds the capacity */
+    bool overflow; /* a push was dropped */
 } sequence;
 
 static void seq_push(sequence* s, int value) {
     if (s->len < (int)(sizeof(s->seq) / sizeof(s->seq[0]))) {
-        s->seq[s->len] = value;
+        s->seq[s->len++] = value;
+    } else {
+        s->overflow = true;
     }
-    s->len++;
 }
 
 /* A fiber that records its id once and returns. */
@@ -367,6 +369,50 @@ static int test_scheduler_no_leak_via_counting_allocator(void) {
     return 0;
 }
 
+/* ---- spawn failure observed from inside a fiber ---- */
+
+typedef struct {
+    bool spawned;
+    int child_ran;
+} spawn_in_fiber_state;
+
+static void spawn_child(void* p) {
+    spawn_in_fiber_state* st = p;
+    st->child_ran++;
+}
+
+static void spawn_parent(void* p) {
+    spawn_in_fiber_state* st = p;
+    st->spawned = cfiber_spawn(spawn_child, st); /* capacity is 1: the parent */
+}
+
+static int test_spawn_failure_inside_fiber(void) {
+    cfiber_scheduler_t sched;
+    const cfiber_scheduler_config_t cfg = {.stack_size = STACK_SIZE, .fibers_per_slab = 1, .max_slabs = 1};
+    ASSERT_EQ_U32(cfiber_scheduler_init(&sched, cfg), 0);
+
+    spawn_in_fiber_state st = {.spawned = true, .child_ran = 0};
+    ASSERT_TRUE(cfiber_scheduler_spawn(&sched, spawn_parent, &st));
+    cfiber_scheduler_run(&sched);
+
+    ASSERT_FALSE(st.spawned);
+    ASSERT_EQ_U32(st.child_ran, 0);
+    ASSERT_EQ_U32(sched.active_count, 0);
+
+    cfiber_scheduler_destroy(&sched);
+    return 0;
+}
+
+#ifdef NDEBUG
+/* Release builds: the in-fiber API outside a run fails or no-ops, not faults. */
+static int test_in_fiber_api_outside_run(void) {
+    ASSERT_NULL(cfiber_scheduler_current());
+    cfiber_yield(); /* no-op */
+    ASSERT_FALSE(cfiber_spawn(spawn_child, nullptr));
+    return 0;
+}
+#endif
+
 /* ============================================================================
  * nested and sequential schedulers
  * ============================================================================ */
@@ -506,6 +552,10 @@ int main(void) {
     RUN_TEST(test_nested_scheduler);
     RUN_TEST(test_sequential_schedulers);
     RUN_TEST(test_scheduler_spawn_fails_when_capacity_exhausted);
+    RUN_TEST(test_spawn_failure_inside_fiber);
+#ifdef NDEBUG
+    RUN_TEST(test_in_fiber_api_outside_run);
+#endif
     RUN_TEST(test_scheduler_reuse_after_drain);
     RUN_TEST(test_scheduler_no_leak_via_counting_allocator);
 #if CFIBER_STACK_SANITIZER

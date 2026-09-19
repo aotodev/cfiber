@@ -234,6 +234,9 @@ size_t cfiber_scheduler_stack_peak(const cfiber_scheduler_t* sched) {
 void cfiber_yield(void) {
     cfiber_scheduler_t* s = s_current_sched;
     ASSERT(s && "cfiber_yield: no active scheduler");
+    if (UNLIKELY(!s)) {
+        return; /* outside a run: nothing to yield to */
+    }
 
     cfiber_task_t* cur = s->current;
     if (!cur) {
@@ -257,5 +260,8 @@ void cfiber_yield(void) {
 bool cfiber_spawn(fiber_fn func, void* user_data) {
     cfiber_scheduler_t* s = s_current_sched;
     ASSERT(s && "cfiber_spawn: no active scheduler");
+    if (UNLIKELY(!s)) {
+        return false;
+    }
     return cfiber_scheduler_spawn(s, func, user_data);
 }

@@ -2,6 +2,7 @@
 .thumb
 
 .extern main
+.extern exit
 .extern _exit
 
 /* Global symbols */
@@ -78,9 +79,8 @@ _start:
 
     /* Call the C entry point */
     bl main
-    /* On return from main, exit via semihosting */
-    /* r0 already holds main's return value */
-    bl _exit
+    /* exit() flushes stdio before the semihosting _exit; r0 is main's status */
+    bl exit
 
 .size _start, .-_start
 

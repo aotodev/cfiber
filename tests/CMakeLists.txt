@@ -129,6 +129,24 @@ if(NOT CFIBER_FREESTANDING)
 endif()
 
 # ======================================================================================
+# Death tests (hosted-only): debug-mode traps and sanitizer reports, in a forked child
+# ======================================================================================
+if(NOT CFIBER_FREESTANDING)
+    add_executable(test_death death/test_death.c)
+    target_include_directories(test_death PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(test_death PRIVATE _GNU_SOURCE)
+    target_link_libraries(test_death PRIVATE cfiber cfiber_test project_flags)
+    if(CFIBER_REACTOR)
+        target_compile_definitions(test_death PRIVATE CFIBER_TEST_HAVE_REACTOR=1)
+        target_link_libraries(test_death PRIVATE cfiber_reactor)
+    endif()
+
+    if(_cfiber_register_ctest)
+        add_test(NAME death COMMAND test_death)
+    endif()
+endif()
+
+# ======================================================================================
 # Reactor tests (Linux-only; requires the optional epoll reactor)
 # ======================================================================================
 if(CFIBER_REACTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")

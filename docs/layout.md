@@ -21,6 +21,7 @@ tests/
   scheduler/   scheduler tests
   stack/       fixed-size + growable stack tests, canary/watermark sanitizer
   defensive/   misuse / error-path tests (built with NDEBUG)
+  death/       the same guards in debug builds, observed through a forked child
   cortex/      Cortex-M support code tests (RAM layout, _sbrk)
   test/        the minimal test framework (test.h + test.c)
   consumer/    out-of-tree find_package smoke test (CI, against a staged install)

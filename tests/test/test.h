@@ -4,46 +4,40 @@
  *
  * @details
  * Designed for both hosted and freestanding (bare-metal Cortex-M via
- * semihosting) targets: it relies only on <stdio.h> and <stdarg.h>, never on
- * malloc, longjmp, atexit, or constructors. Output goes through printf, which
- * the Cortex-M test runners route over semihosting.
+ * semihosting) targets: it relies on <stdio.h>, <stdarg.h> and <inttypes.h>,
+ * never on malloc, longjmp, atexit, or constructors. Output goes through
+ * printf, which the Cortex-M test runners route over semihosting.
  *
- * Two usage styles share the same counters and final verdict:
+ *     static int my_test(void) {
+ *         ASSERT_TRUE(some_condition);
+ *         ASSERT_EQ_U32(actual, expected);
+ *         return 0;            // reached only if no ASSERT_* fired
+ *     }
  *
- *   1. Structured tests (preferred for new code):
+ *     int main(void) {
+ *         cfiber_test_suite_begin("my suite");
+ *         RUN_TEST(my_test);
+ *         return cfiber_test_report();   // non-zero if anything failed
+ *     }
  *
- *          static int my_test(void) {
- *              ASSERT_TRUE(some_condition);
- *              ASSERT_EQ_U32(actual, expected);
- *              return 0;            // reached only if no ASSERT_* fired
- *          }
+ * ASSERT_* macros are fatal: on failure they print file:line plus a message
+ * and `return 1` from the enclosing test function, so the test function must
+ * return int and be invoked through RUN_TEST. Fibers cannot use them (a return
+ * ends the fiber); they record into shared state and main asserts after.
  *
- *          int main(void) {
- *              cfiber_test_suite_begin("my suite");
- *              RUN_TEST(my_test);
- *              return cfiber_test_report();   // non-zero if anything failed
- *          }
+ * Hosted builds also get ASSERT_DEATH(fn, arg): fn runs in a forked child and
+ * the check passes only if the child does not exit normally with 0, which is
+ * how a trapping ASSERT() or a sanitizer report is observed.
  *
- *      ASSERT_* macros are fatal: on failure they print file:line plus a
- *      message and `return 1` from the enclosing test function, so the test
- *      function must return int and be invoked through RUN_TEST.
- *
- *   2. Legacy inline checks (TEST_EQUAL_U32 / TEST_EQUAL_U64 /
- *      TEST_NEARLY_EQUAL): non-fatal, used by the per-architecture
- *      register-preservation tests. They record pass/fail and keep going.
- *
- * Either way, the process exit code is what matters: cfiber_test_report()
- * returns 0 only when every check and every test passed, so ctest / CI can
- * trust it.
+ * cfiber_test_report() returns 0 only when every check and every test passed
+ * and at least one of them ran, so ctest / CI can trust the exit code.
  */
 
 #ifndef CFIBER_TEST_H
 #define CFIBER_TEST_H
 
 #include <inttypes.h>
-#include <math.h>
 #include <stdarg.h>
-#include <stdbool.h>
 #include <stdio.h>
 
 /* ANSI colors for output. */
@@ -71,15 +65,26 @@ extern unsigned int cfiber_checks_passed;
 /** Individual assertions / checks that failed. */
 extern unsigned int cfiber_checks_failed;
 
-/** Print a suite banner and reset the counters. */
+/** Print a suite banner. Counters are never reset: they accumulate across the process. */
 void cfiber_test_suite_begin(const char* suite_name);
 
 /**
  * Print the final summary.
- * @return 0 if every check and every test passed, 1 otherwise. Intended to be
- *         returned directly from main() so the exit code reflects the result.
+ * @return 0 if every check and every test passed and at least one ran, 1
+ *         otherwise. Intended to be returned directly from main() so the exit
+ *         code reflects the result.
  */
 int cfiber_test_report(void);
+
+#ifndef CFIBER_FREESTANDING
+/**
+ * Run @p fn(@p arg) in a forked child.
+ * @return true if the child died: killed by a signal (a trapping ASSERT is
+ *         SIGILL, a libc assert SIGABRT), or exited non-zero (a sanitizer
+ *         report). A child that returns from @p fn exits 0 and did not die.
+ */
+bool cfiber_test_dies(void (*fn)(void*), void* arg);
+#endif
 
 /** Record a passing check (no output). */
 void cfiber_check_pass(void);
@@ -184,79 +189,18 @@ void cfiber_run_test(const char* name, int (*fn)(void));
         cfiber_check_pass();                                                                                           \
     } while (0)
 
-/* NOLINTEND(bugprone-macro-parentheses) */
-
-/* ============================================================================
- * Legacy non-fatal checks, kept for the per-architecture register tests.
- * These do NOT abort the enclosing function; they record and continue.
- * ============================================================================ */
-
-[[maybe_unused]] static void on_test_success(const char* testName) {
-    printf(
-        "  ............................................................................. \033[1;37;42mPassed\033[0m");
-    printf("\r" BLUE_BOLD "  Test:" NC " [%s] \n", testName);
-    cfiber_check_pass();
-}
-
-#if defined(__arm__) && defined(__ARM_FP)
-
-static float abs_single(const float value) {
-    return value >= 0.0f ? value : value * -1.0f;
-}
-
-[[maybe_unused]] static bool nearly_equal(const float rhs, const float lhs, const float tolerance) {
-    return abs_single(lhs - rhs) <= tolerance;
-}
-
-#else
-
-[[maybe_unused]] static bool nearly_equal(const double rhs, const double lhs, const double tolerance) {
-    return fabs(lhs - rhs) <= tolerance;
-}
-
+#ifndef CFIBER_FREESTANDING
+/** Passes if fn(arg) dies in a forked child (trap, abort, sanitizer report). */
+#define ASSERT_DEATH(fn, arg)                                                                                          \
+    do {                                                                                                               \
+        if (!cfiber_test_dies((fn), (arg))) {                                                                          \
+            CFIBER_FAIL_("ASSERT_DEATH failed: %s(%s) returned normally", #fn, #arg);                                  \
+        }                                                                                                              \
+        cfiber_check_pass();                                                                                           \
+    } while (0)
 #endif
 
-#define TEST_NEARLY_EQUAL(testName, value, expected, precision)                                                        \
-    do {                                                                                                               \
-        if (!nearly_equal(value, expected, precision)) {                                                               \
-            cfiber_check_fail(__FILE__,                                                                                \
-                              __LINE__,                                                                                \
-                              "[%s] expected %.3f, but was %.3f",                                                      \
-                              testName,                                                                                \
-                              (double)(expected),                                                                      \
-                              (double)(value));                                                                        \
-        } else {                                                                                                       \
-            on_test_success(testName);                                                                                 \
-        }                                                                                                              \
-    } while (0)
-
-#define TEST_EQUAL_U32(testName, value, expected)                                                                      \
-    do {                                                                                                               \
-        if ((uint32_t)(value) != (uint32_t)(expected)) {                                                               \
-            cfiber_check_fail(__FILE__,                                                                                \
-                              __LINE__,                                                                                \
-                              "[%s] expected %" PRIu32 ", but was %" PRIu32,                                           \
-                              testName,                                                                                \
-                              (uint32_t)(expected),                                                                    \
-                              (uint32_t)(value));                                                                      \
-        } else {                                                                                                       \
-            on_test_success(testName);                                                                                 \
-        }                                                                                                              \
-    } while (0)
-
-#define TEST_EQUAL_U64(testName, value, expected)                                                                      \
-    do {                                                                                                               \
-        if ((uint64_t)(value) != (uint64_t)(expected)) {                                                               \
-            cfiber_check_fail(__FILE__,                                                                                \
-                              __LINE__,                                                                                \
-                              "[%s] expected %" PRIu64 ", but was %" PRIu64,                                           \
-                              testName,                                                                                \
-                              (uint64_t)(expected),                                                                    \
-                              (uint64_t)(value));                                                                      \
-        } else {                                                                                                       \
-            on_test_success(testName);                                                                                 \
-        }                                                                                                              \
-    } while (0)
+/* NOLINTEND(bugprone-macro-parentheses) */
 
 #ifdef __cplusplus
 }
