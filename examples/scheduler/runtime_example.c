@@ -5,7 +5,7 @@
 
 /* ------------------------------------------------------------------ */
 
-void nested_fiber_function(void*) {
+static void nested_fiber_function(void*) {
     int count = 2;
     printf("STARTING nested fiber\n");
 
@@ -24,7 +24,7 @@ typedef struct data {
     const char* name;
 } data_t;
 
-void other_function(void* data) {
+static void other_function(void* data) {
     data_t userData = *(data_t*)data;
 
     const int value = userData.count * 2;
@@ -34,7 +34,7 @@ void other_function(void* data) {
     printf("CALLSTACK nested ended %s, with count = %d and doubled-value = %d\n", userData.name, userData.count, value);
 }
 
-void fiber_function(void* data) {
+static void fiber_function(void* data) {
     data_t userData = *(data_t*)data;
 
     printf("STARTING fiber %s\n", userData.name);

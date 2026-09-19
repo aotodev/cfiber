@@ -31,7 +31,7 @@ stack-use-after-return tracking. The
 issued around every switch so ASan always knows which stack is current.
 
 ```bash
-cmake -B build -DCFIBER_ASAN=ON -DBUILD_TESTS=ON
+cmake -B build -DCFIBER_ASAN=ON -DCFIBER_BUILD_TESTS=ON
 cmake --build build -j
 ASAN_OPTIONS=detect_stack_use_after_return=1 ctest --test-dir build
 # or: ./utils/make.sh -t -e --asan

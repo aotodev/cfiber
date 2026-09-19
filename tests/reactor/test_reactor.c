@@ -7,10 +7,6 @@
  * (non-fiber) test function. Real socketpairs / pipes exercise the park/wake
  * machinery without any network.
  */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "cfiber/reactor/reactor.h"
 #include "test/test.h"
 

@@ -1,7 +1,3 @@
-/* POSIX facilities (sigaction, sigsetjmp/siglongjmp, sysconf) are hidden under
- * strict -std=c23; request them explicitly before any header is included. */
-#define _POSIX_C_SOURCE 200809L
-
 /**
  * @file  test_growable_stack.c
  * @brief Unit tests for MMU-backed growable stacks and their pooled allocator.
@@ -142,7 +138,7 @@ static int test_growable_recycle_keeps_stack_usable(void) {
 
 /* ---- guard-page fault detection ---- */
 
-#if !defined(__SANITIZE_ADDRESS__)
+#ifndef __SANITIZE_ADDRESS__
 static sigjmp_buf g_fault_jmp;
 static volatile sig_atomic_t g_fault_caught;
 
@@ -264,7 +260,7 @@ int main(void) {
     RUN_TEST(test_growable_create_rejects_bad_sizes);
     RUN_TEST(test_growable_usable_region_writable);
     RUN_TEST(test_growable_recycle_keeps_stack_usable);
-#if !defined(__SANITIZE_ADDRESS__)
+#ifndef __SANITIZE_ADDRESS__
     RUN_TEST(test_growable_guard_page_faults);
 #endif
     RUN_TEST(test_pool_alloc_release_destroy);

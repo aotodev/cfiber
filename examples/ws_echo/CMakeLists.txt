@@ -6,6 +6,7 @@
 
 add_library(ws_echo_obj OBJECT ws_echo.c)
 target_link_libraries(ws_echo_obj PUBLIC cfiber_reactor)
+target_compile_definitions(ws_echo_obj PRIVATE _GNU_SOURCE)
 target_compile_options(ws_echo_obj PRIVATE -Wall -Wextra)
 
 add_executable(ws_echo ws_echo_server.c)
@@ -14,10 +15,11 @@ target_compile_options(ws_echo PRIVATE -Wall -Wextra)
 
 add_executable(ws_selftest ws_selftest.c)
 target_link_libraries(ws_selftest PRIVATE ws_echo_obj cfiber_reactor)
+target_compile_definitions(ws_selftest PRIVATE _GNU_SOURCE)
 target_compile_options(ws_selftest PRIVATE -Wall -Wextra)
 
 # Register the self-test with CTest only when the test build is on (so
 # enable_testing() has run) and we can run the binary on the build host.
-if(BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
+if(CFIBER_BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING)
     add_test(NAME ws_echo_selftest COMMAND ws_selftest)
 endif()

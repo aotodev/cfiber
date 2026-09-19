@@ -18,25 +18,18 @@ endif()
 # ======================================================================================
 # cfiber tests (context switch / register preservation)
 # ======================================================================================
-set(_cfiber_test_name "unit_tests_${CFIBER_SYSTEM_PROCESSOR}")
+set(_cfiber_test_name "unit_tests_${_cfiber_arch}")
 
-if(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
+if(_cfiber_arch STREQUAL "arm")
     add_arm_executable(${_cfiber_test_name}
         fiber/context_switch_unit_tests.c
         fiber/switch_regs_arm.S
     )
-elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-    add_executable(${_cfiber_test_name}
-        fiber/context_switch_unit_tests.c
-        fiber/switch_regs_aarch64.S
-    )
-elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    add_executable(${_cfiber_test_name}
-        fiber/context_switch_unit_tests.c
-        fiber/switch_regs_x86_64.S
-    )
 else()
-    message(FATAL_ERROR "Unsupported architecture: ${CFIBER_SYSTEM_PROCESSOR}")
+    add_executable(${_cfiber_test_name}
+        fiber/context_switch_unit_tests.c
+        fiber/switch_regs_${_cfiber_arch}.S
+    )
 endif()
 
 target_include_directories(${_cfiber_test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -49,7 +42,7 @@ endif()
 # ======================================================================================
 # Cortex-M support code (utils/cortex): RAM layout and _sbrk from a fiber stack
 # ======================================================================================
-if(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
+if(_cfiber_arch STREQUAL "arm")
     add_arm_executable(test_cortex_syscalls cortex/test_syscalls.c)
     target_include_directories(test_cortex_syscalls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(test_cortex_syscalls PRIVATE cfiber cfiber_test project_flags)
@@ -91,6 +84,8 @@ if(NOT CFIBER_FREESTANDING)
 
     add_executable(test_growable_stack stack/test_growable_stack.c)
     target_include_directories(test_growable_stack PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    # sigaction, sigsetjmp: hidden under strict -std=c23
+    target_compile_definitions(test_growable_stack PRIVATE _POSIX_C_SOURCE=200809L)
     target_link_libraries(test_growable_stack PRIVATE cfiber cfiber_test project_flags)
 
     if(_cfiber_register_ctest)
@@ -105,10 +100,12 @@ endif()
 # The library's misuse guards trap/abort in debug builds, so they can only be
 # tested when NDEBUG disarms them. Rather than force the whole build to Release,
 # we compile just the sources under test directly into this target with NDEBUG,
-# leaving the rest of the suite (and the shared cfiber library) untouched.
+# leaving the rest of the suite (and the shared cfiber library) untouched. The
+# library's PUBLIC usage requirements (sanitizer flags, layout defines) are
+# taken from the cfiber target so this build is instrumented like the rest.
 # ======================================================================================
 if(NOT CFIBER_FREESTANDING)
-    set(_cfiber_src ${CMAKE_SOURCE_DIR}/src/cfiber)
+    set(_cfiber_src ${PROJECT_SOURCE_DIR}/src/cfiber)
     add_executable(test_defensive
         defensive/test_defensive.c
         ${_cfiber_src}/memory/slab_alloc.c
@@ -116,9 +113,14 @@ if(NOT CFIBER_FREESTANDING)
         ${_cfiber_src}/stack/growable_stack.c
         ${_cfiber_src}/stack/growable_stack_allocator.c
     )
-    target_include_directories(test_defensive
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/include)
-    target_compile_definitions(test_defensive PRIVATE NDEBUG CFIBER_DEFENSIVE=1 _GNU_SOURCE)
+    target_include_directories(test_defensive PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        $<TARGET_PROPERTY:cfiber,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(test_defensive PRIVATE
+        NDEBUG CFIBER_DEFENSIVE=1 _GNU_SOURCE
+        $<TARGET_PROPERTY:cfiber,INTERFACE_COMPILE_DEFINITIONS>)
+    target_compile_options(test_defensive PRIVATE $<TARGET_PROPERTY:cfiber,INTERFACE_COMPILE_OPTIONS>)
+    target_link_options(test_defensive PRIVATE $<TARGET_PROPERTY:cfiber,INTERFACE_LINK_OPTIONS>)
     target_link_libraries(test_defensive PRIVATE cfiber_test project_flags)
 
     if(_cfiber_register_ctest)
@@ -132,6 +134,7 @@ endif()
 if(CFIBER_REACTOR AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_reactor reactor/test_reactor.c)
     target_include_directories(test_reactor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(test_reactor PRIVATE _GNU_SOURCE)
     target_link_libraries(test_reactor PRIVATE cfiber_reactor cfiber_test project_flags)
 
     if(_cfiber_register_ctest)

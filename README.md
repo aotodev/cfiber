@@ -93,7 +93,7 @@ The watermark reports peak usage, so stack sizing is a measurement. See
 Needs CMake 3.28+ and a GNU-compatible C23 compiler. CI builds with GCC 15.
 
 ```bash
-cmake -B build -DCFIBER_BUILD_EXAMPLES=ON -DBUILD_TESTS=ON
+cmake -B build -DCFIBER_BUILD_EXAMPLES=ON -DCFIBER_BUILD_TESTS=ON
 cmake --build build -j
 ctest --test-dir build
 ```

@@ -16,10 +16,6 @@
  *   - every fiber that started also finished (none lost mid-flight);
  *   - the loop returned (no deadlock / no fiber parked forever).
  */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "cfiber/reactor/reactor.h"
 #include "fuzz_input.h"
 
@@ -97,6 +93,7 @@ static void worker_fiber(void* arg) {
     st->finished++;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage): libFuzzer entry point
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     fuzz_input in = fuzz_input_init(data, size);
 

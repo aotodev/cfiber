@@ -4,9 +4,6 @@
  * crypto vector, echo correctness, and 300 concurrent connections multiplexed by
  * a single epoll loop. Exit code is non-zero on any failure.
  */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
 #include "ws_echo.h"
 
 #include <arpa/inet.h>

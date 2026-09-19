@@ -92,6 +92,7 @@ static void worker_fiber(void* arg) {
     st->finished++;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage): libFuzzer entry point
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     fuzz_input in = fuzz_input_init(data, size);
 

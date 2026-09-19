@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(cfiber VERSION 0.1.0 LANGUAGES C ASM)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 # ---------------------------------------------------------------------------------------
 # Global properties and options
@@ -14,7 +16,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 
 option(CFIBER_BUILD_EXAMPLES            "Build the standalone examples"                      OFF)
-option(BUILD_TESTS                      "Build unit tests"                                   OFF)
+option(CFIBER_BUILD_TESTS               "Build unit tests"                                   OFF)
+option(CFIBER_INSTALL                   "Generate install and package-config rules"          ${PROJECT_IS_TOP_LEVEL})
 option(CFIBER_STACK_SANITIZER           "Enable stack canary + watermark for non-MMU stacks" OFF)
 option(CFIBER_ASAN                      "Build with AddressSanitizer + fiber-aware instrumentation (hosted only)" OFF)
 option(CFIBER_UBSAN                     "Build with UndefinedBehaviorSanitizer (hosted only; combinable with CFIBER_ASAN)" OFF)
@@ -38,8 +41,23 @@ set(CFIBER_ARM_FPU_NAME  "" CACHE STRING "ARM FPU forwarded to -mfpu (e.g. fpv4-
 set(CFIBER_SYSTEM_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING
     "Target arch (x86_64, aarch64, arm, ...)")
 
+# Old spelling, kept for one release.
+if(BUILD_TESTS)
+    message(DEPRECATION "BUILD_TESTS is renamed CFIBER_BUILD_TESTS")
+    set(CFIBER_BUILD_TESTS ON)
+endif()
+
+# Vendor spellings normalised once; every arch check below reads _cfiber_arch,
+# and it reaches the subdirectories as a normal variable.
+string(TOLOWER "${CFIBER_SYSTEM_PROCESSOR}" _cfiber_arch)
+if(_cfiber_arch STREQUAL "amd64")
+    set(_cfiber_arch x86_64)
+elseif(_cfiber_arch STREQUAL "arm64")
+    set(_cfiber_arch aarch64)
+endif()
+
 # Freestanding mode is selected by architecture: bare-metal ARM Cortex-M.
-if(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
+if(_cfiber_arch STREQUAL "arm")
     set(CFIBER_FREESTANDING ON)
 else()
     set(CFIBER_FREESTANDING OFF)
@@ -77,7 +95,7 @@ target_compile_options(project_flags INTERFACE
     $<$<CONFIG:Release>:-O2>
 )
 
-if(CFIBER_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+if(_cfiber_arch STREQUAL "x86_64")
     target_compile_options(project_flags INTERFACE
         $<$<COMPILE_LANGUAGE:C>:-masm=intel>
     )
@@ -99,6 +117,8 @@ else()
     endif()
 endif()
 
+add_library(cfiber::cfiber ALIAS cfiber)
+
 set(_cfiber_src_dir ${CMAKE_CURRENT_SOURCE_DIR}/src/cfiber)
 
 target_sources(cfiber PRIVATE
@@ -109,12 +129,20 @@ target_sources(cfiber PRIVATE
     ${_cfiber_src_dir}/debug/asan.c
 )
 
-target_include_directories(cfiber PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+configure_file(cmake/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/cfiber/version.h @ONLY)
+
+target_include_directories(cfiber PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 
 # PUBLIC: the value sizes slab_t and everything embedding it.
 target_compile_definitions(cfiber PUBLIC "BITMAP_SIZE=${CFIBER_BITMAP_SIZE}U")
 
-target_link_libraries(cfiber PRIVATE project_flags)
+# The warning flags as PRIVATE options rather than a link to project_flags, so the
+# exported target does not reference an unexported interface library.
+target_compile_options(cfiber PRIVATE $<TARGET_PROPERTY:project_flags,INTERFACE_COMPILE_OPTIONS>)
 
 # Fixed-size stack allocator: hosted and freestanding both.
 target_sources(cfiber PRIVATE
@@ -254,19 +282,19 @@ endif()
 # ---------------------------------------------------------------------------------------
 # Architecture-specific assembly + ABI flags
 # ---------------------------------------------------------------------------------------
-if(CFIBER_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+if(_cfiber_arch STREQUAL "x86_64")
     target_sources(cfiber PRIVATE
         ${_cfiber_src_dir}/fiber/context_x86_64.S
         ${_cfiber_src_dir}/fiber/fiber_prologue_x86_64_fiber.S
     )
 
-elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+elseif(_cfiber_arch STREQUAL "aarch64")
     target_sources(cfiber PRIVATE
         ${_cfiber_src_dir}/fiber/context_aarch64.S
         ${_cfiber_src_dir}/fiber/fiber_prologue_aarch64_fiber.S
     )
 
-elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
+elseif(_cfiber_arch STREQUAL "arm")
     target_compile_options(cfiber PRIVATE
         $<$<COMPILE_LANGUAGE:C>:-ffunction-sections>
         $<$<COMPILE_LANGUAGE:C>:-fdata-sections>
@@ -286,29 +314,29 @@ elseif(CFIBER_SYSTEM_PROCESSOR MATCHES "arm")
         message(FATAL_ERROR "Unsupported or unset CFIBER_TARGET_CPU: '${CFIBER_TARGET_CPU}'")
     endif()
 
-    # ABI/arch-affecting flags must reach every translation unit (including
-    # assembly) and the link line (libgcc multilib selection). The FPU half of
-    # context_t follows the compiler's __ARM_FP, so consumers must use the same
-    # -mfloat-abi/-mfpu as the library.
+    # ABI/arch-affecting flags: PUBLIC on the target so a parent project's own
+    # translation units and link line get the same multilib and VFP ABI; the
+    # directory-wide copies reach the startup objects that link no target.
+    # The FPU half of context_t follows the compiler's __ARM_FP.
+    set(_cfiber_arm_flags "")
     if(CFIBER_ARM_FLOAT_ABI)
-        add_compile_options(-mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
-        add_link_options(-mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
-        target_compile_options(cfiber PRIVATE -mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
+        list(APPEND _cfiber_arm_flags -mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
     endif()
-
     if(CFIBER_ARM_FPU_NAME)
-        add_compile_options(-mfpu=${CFIBER_ARM_FPU_NAME})
-        add_link_options(-mfpu=${CFIBER_ARM_FPU_NAME})
-        target_compile_options(cfiber PRIVATE -mfpu=${CFIBER_ARM_FPU_NAME})
+        list(APPEND _cfiber_arm_flags -mfpu=${CFIBER_ARM_FPU_NAME})
     endif()
 else()
     message(FATAL_ERROR "Unsupported architecture: '${CFIBER_SYSTEM_PROCESSOR}'")
 endif()
 
 if(CFIBER_TARGET_CPU)
-    add_compile_options(-mcpu=${CFIBER_TARGET_CPU})
-    add_link_options(-mcpu=${CFIBER_TARGET_CPU})
-    target_compile_options(cfiber PRIVATE -mcpu=${CFIBER_TARGET_CPU})
+    list(APPEND _cfiber_arm_flags -mcpu=${CFIBER_TARGET_CPU})
+endif()
+if(_cfiber_arm_flags)
+    add_compile_options(${_cfiber_arm_flags})
+    add_link_options(${_cfiber_arm_flags})
+    target_compile_options(cfiber PUBLIC ${_cfiber_arm_flags})
+    target_link_options(cfiber PUBLIC ${_cfiber_arm_flags})
 endif()
 
 # ---------------------------------------------------------------------------------------
@@ -342,11 +370,14 @@ if(CFIBER_REACTOR)
         endif()
     endif()
 
+    add_library(cfiber::reactor ALIAS cfiber_reactor)
+
     target_sources(cfiber_reactor PRIVATE
         ${_cfiber_src_dir}/reactor/reactor.c
     )
     target_compile_definitions(cfiber_reactor PRIVATE _GNU_SOURCE)
-    target_link_libraries(cfiber_reactor PUBLIC cfiber Threads::Threads PRIVATE project_flags)
+    target_link_libraries(cfiber_reactor PUBLIC cfiber Threads::Threads)
+    target_compile_options(cfiber_reactor PRIVATE $<TARGET_PROPERTY:project_flags,INTERFACE_COMPILE_OPTIONS>)
 
     # PUBLIC so the reactor's dependents (tests, ws_echo) compile and link with TSan.
     if(CFIBER_TSAN)
@@ -362,15 +393,74 @@ endif()
 # ---------------------------------------------------------------------------------------
 # Optional targets
 # ---------------------------------------------------------------------------------------
-if(BUILD_TESTS)
+if(CFIBER_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
-# Unconditional: the subdirectory gates each example itself, and ws_echo's self-test
-# is the reactor's end-to-end test.
-add_subdirectory(examples)
+# The subdirectory gates each example; ws_echo's self-test is also the reactor's
+# end-to-end test, hence the tests condition.
+if(CFIBER_BUILD_EXAMPLES OR CFIBER_BUILD_TESTS)
+    add_subdirectory(examples)
+endif()
 
 if(CFIBER_FUZZ)
     add_subdirectory(fuzz)
+endif()
+
+# ---------------------------------------------------------------------------------------
+# Install: targets, headers, CMake package (find_package(cfiber)) and pkg-config.
+# The exported targets carry the PUBLIC definitions and options above, so a
+# consumer of an installed sanitizer or Cortex-M build gets the matching flags.
+# ---------------------------------------------------------------------------------------
+if(CFIBER_INSTALL)
+    set(_cfiber_export_targets cfiber)
+    if(CFIBER_REACTOR)
+        list(APPEND _cfiber_export_targets cfiber_reactor)
+    endif()
+
+    install(TARGETS ${_cfiber_export_targets}
+        EXPORT cfiberTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+    install(DIRECTORY include/cfiber DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/cfiber/version.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/cfiber)
+
+    set(_cfiber_cmake_dir ${CMAKE_INSTALL_LIBDIR}/cmake/cfiber)
+    install(EXPORT cfiberTargets
+        NAMESPACE cfiber::
+        DESTINATION ${_cfiber_cmake_dir}
+    )
+    configure_package_config_file(cmake/cfiberConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/cfiberConfig.cmake
+        INSTALL_DESTINATION ${_cfiber_cmake_dir}
+    )
+    # SameMajorVersion: the major is the SOVERSION and the ABI promise, once 1.0 is tagged.
+    write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/cfiberConfigVersion.cmake
+        COMPATIBILITY SameMajorVersion
+    )
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/cfiberConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/cfiberConfigVersion.cmake
+        DESTINATION ${_cfiber_cmake_dir}
+    )
+
+    # pkg-config: the layout-affecting define and the ARM ABI flags, so a plain
+    # Makefile consumer matches the library.
+    set(CFIBER_PC_LIBS "-lcfiber")
+    if(CFIBER_REACTOR)
+        set(CFIBER_PC_LIBS "-lcfiber_reactor -lcfiber -lpthread")
+    endif()
+    set(CFIBER_PC_CFLAGS "-DBITMAP_SIZE=${CFIBER_BITMAP_SIZE}U")
+    if(_cfiber_arm_flags)
+        string(JOIN " " _cfiber_arm_flags_str ${_cfiber_arm_flags})
+        string(APPEND CFIBER_PC_CFLAGS " ${_cfiber_arm_flags_str}")
+        string(APPEND CFIBER_PC_LIBS " ${_cfiber_arm_flags_str}")
+    endif()
+    configure_file(cmake/cfiber.pc.in ${CMAKE_CURRENT_BINARY_DIR}/cfiber.pc @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/cfiber.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 endif()

@@ -6,7 +6,7 @@
 # helpers are compiled once and shared across all callers via OBJECT libraries.
 # ---------------------------------------------------------------------------------------
 function(add_arm_executable name)
-    set(_cortex_dir "${CMAKE_SOURCE_DIR}/utils/cortex")
+    set(_cortex_dir "${PROJECT_SOURCE_DIR}/utils/cortex")
 
     if(CFIBER_TARGET_CPU MATCHES "^cortex-m0$")
         set(_startup_src   "${_cortex_dir}/startup_qemu_armv6-m.S")
