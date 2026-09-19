@@ -6,6 +6,7 @@
 
 /* External function references */
 .extern main
+.extern exit
 .extern _exit
 
 /* ======================================================================= */
@@ -84,9 +85,8 @@ zero_loop:
 zero_done:
     /* Call the C entry point */
     bl main
-    /* On return from main, exit via semihosting */
-    /* r0 already holds main's return value */
-    bl _exit
+    /* exit() flushes stdio before the semihosting _exit; r0 is main's status */
+    bl exit
 
 /*
  * Default exception handlers, weak so a test can override them. An unexpected

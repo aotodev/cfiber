@@ -6,17 +6,19 @@
 
 #include "test/test.h"
 
+#ifndef CFIBER_FREESTANDING
+#include <sys/resource.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 unsigned int cfiber_tests_run = 0;
 unsigned int cfiber_tests_failed = 0;
 unsigned int cfiber_checks_passed = 0;
 unsigned int cfiber_checks_failed = 0;
 
 void cfiber_test_suite_begin(const char* suite_name) {
-    cfiber_tests_run = 0;
-    cfiber_tests_failed = 0;
-    cfiber_checks_passed = 0;
-    cfiber_checks_failed = 0;
-
     printf("\n" BLUE_BOLD "Running suite: %s" NC "\n", suite_name);
     printf("--------------------------------------------------------------------------------------\n");
 }
@@ -57,6 +59,10 @@ int cfiber_test_report(void) {
     printf("  tests:  %u run, " RED "%u failed" NC "\n", cfiber_tests_run, cfiber_tests_failed);
     printf("  checks: %u passed, " RED "%u failed" NC "\n", cfiber_checks_passed, cfiber_checks_failed);
 
+    if (cfiber_tests_run == 0 && cfiber_checks_passed == 0 && cfiber_checks_failed == 0) {
+        printf("  " RED "RESULT: FAIL (nothing ran)" NC "\n\n");
+        return 1;
+    }
     if (cfiber_tests_failed == 0 && cfiber_checks_failed == 0) {
         printf("  " GREEN "RESULT: PASS" NC "\n\n");
         return 0;
@@ -65,3 +71,24 @@ int cfiber_test_report(void) {
     printf("  " RED "RESULT: FAIL" NC "\n\n");
     return 1;
 }
+
+#ifndef CFIBER_FREESTANDING
+bool cfiber_test_dies(void (*fn)(void*), void* arg) {
+    fflush(stdout);
+    const pid_t pid = fork();
+    if (pid < 0) {
+        return false;
+    }
+    if (pid == 0) {
+        /* The child is meant to die; no core dump for it, native or under qemu-user. */
+        setrlimit(RLIMIT_CORE, &(struct rlimit){.rlim_cur = 0, .rlim_max = 0});
+        fn(arg);
+        _exit(0); /* no atexit, no second flush of the parent's buffers */
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) != pid) {
+        return false;
+    }
+    return !(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+#endif

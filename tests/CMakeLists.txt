@@ -5,7 +5,9 @@ include(arm_executable)
 # ======================================================================================
 add_library(cfiber_test STATIC test/test.c)
 target_include_directories(cfiber_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cfiber_test PUBLIC project_flags)
+# cfiber: the framework follows the library's hosted/freestanding split
+# (CFIBER_FREESTANDING) for its fork-based death helper.
+target_link_libraries(cfiber_test PUBLIC cfiber project_flags)
 
 # add_test() can only run the binary on the build host, so register CTest cases
 # only for native builds. Cross-compiled targets (arm, aarch64) are run through
@@ -125,6 +127,24 @@ if(NOT CFIBER_FREESTANDING)
 
     if(_cfiber_register_ctest)
         add_test(NAME defensive COMMAND test_defensive)
+    endif()
+endif()
+
+# ======================================================================================
+# Death tests (hosted-only): debug-mode traps and sanitizer reports, in a forked child
+# ======================================================================================
+if(NOT CFIBER_FREESTANDING)
+    add_executable(test_death death/test_death.c)
+    target_include_directories(test_death PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(test_death PRIVATE _GNU_SOURCE)
+    target_link_libraries(test_death PRIVATE cfiber cfiber_test project_flags)
+    if(CFIBER_REACTOR)
+        target_compile_definitions(test_death PRIVATE CFIBER_TEST_HAVE_REACTOR=1)
+        target_link_libraries(test_death PRIVATE cfiber_reactor)
+    endif()
+
+    if(_cfiber_register_ctest)
+        add_test(NAME death COMMAND test_death)
     endif()
 endif()
 

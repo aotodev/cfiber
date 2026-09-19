@@ -19,7 +19,10 @@ ctest --test-dir build
 
 The suites use the minimal framework in `tests/test/`, not an external one, so
 the tests build and run on the bare-metal targets with no dependency to
-cross-compile.
+cross-compile. A suite in which nothing ran fails. On hosted targets the
+framework also has `ASSERT_DEATH`, which runs a function in a forked child and
+passes only if the child dies, which is how a trapping `ASSERT()` or a
+sanitizer report is observed.
 
 ## What the suites cover
 
@@ -54,6 +57,11 @@ ring under stress, and create/destroy churn. Also run under ThreadSanitizer.
 foreign-pointer release. Built with `-DNDEBUG` so the guards return errors
 instead of tripping an assert, which is the configuration a release consumer
 actually gets.
+
+**Death tests** (`tests/death/`): the same guards in a debug build, where they
+trap, plus the in-fiber APIs outside a run, a scheduler destroyed with live
+fibers or re-entered from its own fiber, and, under ASan, a fiber writing into
+the redzone below its stack. Each case runs in a forked child.
 
 ## Beyond the unit tests
 

@@ -70,10 +70,15 @@ typedef struct {
     size_t live_bytes;
     unsigned int allocs;
     unsigned int frees;
+    unsigned int fail_at; /* 1-based index of the allocation to refuse; 0 = never */
 } counting_ctx;
 
 static void* counting_alloc(size_t size, void* ctx) {
     counting_ctx* c = ctx;
+    if (c->fail_at && c->allocs + 1 == c->fail_at) {
+        c->allocs++;
+        return nullptr;
+    }
     void* p = malloc(size);
     if (p) {
         c->allocs++;
@@ -416,6 +421,60 @@ static int test_multislab_single_slab_not_freed_when_empty(void) {
     return 0;
 }
 
+/* More blocks than one bitmap word: the multi-word scan and its capacity tail. */
+static int test_multislab_multiword_bitmap(void) {
+    constexpr uint32_t PER_SLAB = BITMAP_WORD_BITS + 5;
+    multislab_t ms;
+    ASSERT_EQ_U32(multislab_init(&ms, BLOCK, PER_SLAB, 1, 16), 0);
+
+    void* blocks[PER_SLAB];
+    for (uint32_t i = 0; i < PER_SLAB; i++) {
+        blocks[i] = multislab_alloc(&ms);
+        ASSERT_NOT_NULL(blocks[i]);
+        for (uint32_t j = 0; j < i; j++) {
+            ASSERT_NE_PTR(blocks[i], blocks[j]);
+        }
+    }
+    ASSERT_NULL(multislab_alloc(&ms)); /* exactly PER_SLAB fit */
+    ASSERT_EQ_U32(ms.slab_count, 1);
+
+    /* a slot past the first word comes back and is reused */
+    multislab_release(&ms, blocks[BITMAP_WORD_BITS + 2]);
+    ASSERT_EQ_PTR(multislab_alloc(&ms), blocks[BITMAP_WORD_BITS + 2]);
+
+    for (uint32_t i = 0; i < PER_SLAB; i++) {
+        multislab_release(&ms, blocks[i]);
+    }
+    ASSERT_TRUE(multislab_invariants_hold(&ms));
+    multislab_destroy(&ms);
+    return 0;
+}
+
+/* A backing allocator that fails: grow reports exhaustion, frees what it had
+ * taken, and the multislab stays usable and leak-free. */
+static int test_multislab_backing_failure(void) {
+    /* grow takes two allocations, the node then the slab memory; fail each */
+    for (unsigned int fail_at = 1; fail_at <= 2; fail_at++) {
+        counting_ctx ctx = {.fail_at = fail_at};
+        multislab_t ms;
+        ASSERT_EQ_U32(multislab_init_ext(&ms, BLOCK, 2, 0, 1, counting_alloc, counting_free, &ctx), 0);
+
+        ASSERT_NULL(multislab_alloc(&ms));
+        ASSERT_EQ_U32(ms.slab_count, 0);
+        ASSERT_EQ_U64((uint64_t)ctx.live_bytes, 0);
+        ASSERT_TRUE(multislab_invariants_hold(&ms));
+
+        /* the allocator recovers: the next grow succeeds */
+        ctx.fail_at = 0;
+        void* p = multislab_alloc(&ms);
+        ASSERT_NOT_NULL(p);
+        multislab_release(&ms, p);
+        multislab_destroy(&ms);
+        ASSERT_EQ_U64((uint64_t)ctx.live_bytes, 0);
+    }
+    return 0;
+}
+
 /* End-to-end leak check: every byte the multislab requests from its backing
  * allocator must be returned by destroy, regardless of the alloc/free pattern. */
 static int test_multislab_no_leak_via_counting_allocator(void) {
@@ -469,6 +528,8 @@ int main(void) {
     RUN_TEST(test_multislab_alloc_scans_active_list);
     RUN_TEST(test_multislab_empty_count_tracks_reuse);
     RUN_TEST(test_multislab_single_slab_not_freed_when_empty);
+    RUN_TEST(test_multislab_multiword_bitmap);
+    RUN_TEST(test_multislab_backing_failure);
     RUN_TEST(test_multislab_no_leak_via_counting_allocator);
 
     return cfiber_test_report();

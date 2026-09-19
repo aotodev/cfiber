@@ -10,7 +10,9 @@
 #include "cfiber/reactor/reactor.h"
 #include "test/test.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -1338,6 +1340,214 @@ static int test_second_waiter_is_busy(void) {
 }
 
 /* ============================================================================
+ * cancel of a descriptor park, EINTR, timer heap growth, TCP transport
+ * ============================================================================ */
+
+static cfiber_reactor_handle_t g_fdcancel_target;
+static ssize_t g_fdcancel_rc;
+static int g_fdcancel_errno;
+
+static void fd_cancel_reader_fiber(void* arg) {
+    int fd = (int)(intptr_t)arg;
+    g_fdcancel_target = cfiber_ev_self();
+    char buf[8];
+    g_fdcancel_rc = cfiber_ev_read_timed(fd, buf, sizeof buf, ms_to_ns(500));
+    g_fdcancel_errno = errno;
+}
+
+static void fd_cancel_canceller_fiber(void* arg) {
+    (void)arg;
+    cfiber_ev_yield(); /* let the reader park on the descriptor */
+    cfiber_ev_cancel(g_fdcancel_target);
+}
+
+/* Cancel resumes a fiber parked on a descriptor, not only an async park. */
+static int test_cancel_fd_park(void) {
+    g_fdcancel_rc = -2;
+    g_fdcancel_errno = 0;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, fd_cancel_reader_fiber, (void*)(intptr_t)fds[0], nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, fd_cancel_canceller_fiber, nullptr, nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32((uint32_t)(int)g_fdcancel_rc, (uint32_t)-1);
+    ASSERT_EQ_U32(g_fdcancel_errno, ECANCELED);
+
+    close(fds[0]);
+    close(fds[1]);
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* A real signal interrupts epoll_wait: the loop must retry, not stop. */
+static volatile sig_atomic_t g_sigusr1_seen;
+
+static void on_sigusr1(int signo) {
+    (void)signo;
+    g_sigusr1_seen = 1;
+}
+
+static void* signal_sender_thread(void* arg) {
+    pthread_t* target = arg;
+    struct timespec ts = {.tv_sec = 0, .tv_nsec = 20L * 1000000};
+    nanosleep(&ts, nullptr);
+    pthread_kill(*target, SIGUSR1); /* lands on the loop thread inside epoll_wait */
+    return nullptr;
+}
+
+static cfiber_ev_status_t g_eintr_sleep_st;
+
+static void eintr_sleeper_fiber(void* arg) {
+    (void)arg;
+    g_eintr_sleep_st = cfiber_ev_sleep((uint64_t)ms_to_ns(100));
+}
+
+static int test_epoll_wait_eintr(void) {
+    g_sigusr1_seen = 0;
+    g_eintr_sleep_st = CFIBER_EV_ERROR;
+
+    struct sigaction sa = {0};
+    struct sigaction old;
+    sa.sa_handler = on_sigusr1; /* no SA_RESTART: epoll_wait fails with EINTR */
+    sigemptyset(&sa.sa_mask);
+    ASSERT_EQ_U32(sigaction(SIGUSR1, &sa, &old), 0);
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, eintr_sleeper_fiber, nullptr, nullptr));
+
+    pthread_t self = pthread_self();
+    pthread_t th;
+    ASSERT_EQ_U32(pthread_create(&th, nullptr, signal_sender_thread, &self), 0);
+
+    ASSERT_EQ_U32(cfiber_reactor_run(r), 0);
+    pthread_join(th, nullptr);
+    sigaction(SIGUSR1, &old, nullptr);
+
+    ASSERT_EQ_U32((uint32_t)g_sigusr1_seen, 1);
+    ASSERT_EQ_U32(g_eintr_sleep_st, CFIBER_EV_TIMEOUT);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* More timers than the heap's initial capacity, waking in deadline order. */
+#define MANY_TIMERS 40
+
+static int g_many_order[MANY_TIMERS];
+static int g_many_len;
+
+static void many_timer_fiber(void* arg) {
+    int id = (int)(intptr_t)arg;
+    (void)cfiber_ev_sleep((uint64_t)ms_to_ns(1 + (id * 2)));
+    if (g_many_len < MANY_TIMERS) {
+        g_many_order[g_many_len++] = id;
+    }
+}
+
+static int test_timer_heap_growth(void) {
+    g_many_len = 0;
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    /* spawn in reverse so the heap has to sort, not just append */
+    for (int id = MANY_TIMERS - 1; id >= 0; id--) {
+        ASSERT_TRUE(cfiber_reactor_spawn(r, many_timer_fiber, (void*)(intptr_t)id, nullptr));
+    }
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_many_len, MANY_TIMERS);
+    for (int i = 0; i < MANY_TIMERS; i++) {
+        ASSERT_EQ_U32(g_many_order[i], i);
+    }
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* Loopback TCP through the transport helpers: accept, connect, echo. */
+typedef struct {
+    int lfd;
+    struct sockaddr_in addr;
+    char server_got[8];
+    ssize_t server_n;
+    char client_got[8];
+    ssize_t client_n;
+    int connect_rc;
+    int connect_errno;
+} tcp_state;
+
+static tcp_state g_tcp;
+
+static void tcp_server_fiber(void* arg) {
+    tcp_state* st = arg;
+    int c = cfiber_ev_accept(st->lfd, nullptr, nullptr); /* parks until the client connects */
+    if (c < 0) {
+        st->server_n = -1;
+        return;
+    }
+    st->server_n = cfiber_ev_read(c, st->server_got, sizeof st->server_got);
+    if (st->server_n > 0) {
+        (void)cfiber_ev_write(c, st->server_got, (size_t)st->server_n);
+    }
+    close(c);
+    close(st->lfd);
+}
+
+static void tcp_client_fiber(void* arg) {
+    tcp_state* st = arg;
+    int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+        st->connect_rc = -1;
+        return;
+    }
+    st->connect_rc = cfiber_ev_connect(fd, (const struct sockaddr*)&st->addr, sizeof st->addr);
+    st->connect_errno = errno;
+    if (st->connect_rc == 0 && cfiber_ev_write(fd, "ping", 4) == 4) {
+        st->client_n = cfiber_ev_read(fd, st->client_got, sizeof st->client_got);
+    }
+    close(fd);
+}
+
+static int test_tcp_accept_connect(void) {
+    memset(&g_tcp, 0, sizeof g_tcp);
+    g_tcp.server_n = -2;
+    g_tcp.client_n = -2;
+    g_tcp.connect_rc = -2;
+
+    g_tcp.lfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    ASSERT_TRUE(g_tcp.lfd >= 0);
+    struct sockaddr_in bind_addr = {.sin_family = AF_INET, .sin_port = 0};
+    bind_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ_U32(bind(g_tcp.lfd, (const struct sockaddr*)&bind_addr, sizeof bind_addr), 0);
+    ASSERT_EQ_U32(listen(g_tcp.lfd, 1), 0);
+    socklen_t alen = sizeof g_tcp.addr;
+    ASSERT_EQ_U32(getsockname(g_tcp.lfd, (struct sockaddr*)&g_tcp.addr, &alen), 0); /* the ephemeral port */
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, tcp_server_fiber, &g_tcp, nullptr));
+    ASSERT_TRUE(cfiber_reactor_spawn(r, tcp_client_fiber, &g_tcp, nullptr));
+
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_tcp.connect_rc, 0);
+    ASSERT_EQ_U32(g_tcp.server_n, 4);
+    ASSERT_EQ_U32(g_tcp.client_n, 4);
+    ASSERT_TRUE(memcmp(g_tcp.client_got, "ping", 4) == 0);
+
+    cfiber_reactor_destroy(r);
+    return 0;
+}
+
+/* ============================================================================
  * create / run / destroy churn (leak balance under ASan)
  * ============================================================================ */
 
@@ -1389,6 +1599,10 @@ int main(void) {
     RUN_TEST(test_peer_close_reads_zero);
     RUN_TEST(test_close_parked_fd);
     RUN_TEST(test_second_waiter_is_busy);
+    RUN_TEST(test_cancel_fd_park);
+    RUN_TEST(test_epoll_wait_eintr);
+    RUN_TEST(test_timer_heap_growth);
+    RUN_TEST(test_tcp_accept_connect);
     RUN_TEST(test_create_destroy_churn);
 
     return cfiber_test_report();

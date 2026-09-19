@@ -433,6 +433,10 @@ if [[ "${build_tests:-OFF}" == ON ]]; then
         section "running defensive error-path tests"
         run_executable "tests/test_defensive"
         ok "defensive tests finished"
+
+        section "running death tests"
+        run_executable "tests/test_death"
+        ok "death tests finished"
     fi
 
     if [[ "${stack_sanitizer:-OFF}" == ON ]]; then

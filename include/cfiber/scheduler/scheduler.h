@@ -184,7 +184,8 @@ CFIBER_EXPORT size_t cfiber_scheduler_stack_peak(const cfiber_scheduler_t* sched
  * @details The fibre is placed at the back of the ready queue and the
  *          scheduler dispatches the next one.  If no other fiber is ready
  *          this is a no-op.
- * @pre Must be called from within a running fiber.
+ * @pre Must be called from within a running fiber. Outside a run this asserts
+ *      in debug builds and is a no-op in release builds.
  */
 CFIBER_EXPORT void cfiber_yield(void);
 
