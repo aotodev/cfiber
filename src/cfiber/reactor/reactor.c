@@ -511,7 +511,16 @@ cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns
     }
     cfiber_reactor_t* s = g_reactor;
 
-    if (arm_fd(s, f, fd, direction) < 0) {
+    /* Public bits only: an epoll flag such as EPOLLET passed through here
+     * would break the ONESHOT re-arm protocol. */
+    if (UNLIKELY(!direction || (direction & ~(uint32_t)(CFIBER_EV_IN | CFIBER_EV_OUT)))) {
+        errno = EINVAL;
+        return CFIBER_EV_ERROR;
+    }
+    const uint32_t events =
+        ((direction & CFIBER_EV_IN) ? (uint32_t)EPOLLIN : 0u) | ((direction & CFIBER_EV_OUT) ? (uint32_t)EPOLLOUT : 0u);
+
+    if (arm_fd(s, f, fd, events) < 0) {
         return CFIBER_EV_ERROR;
     }
 
@@ -609,7 +618,7 @@ static ssize_t read_impl(int fd, void* buf, size_t n, int64_t timeout_ns) {
             continue;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            cfiber_ev_status_t st = cfiber_ev_wait(fd, EPOLLIN, remaining_ns(deadline));
+            cfiber_ev_status_t st = cfiber_ev_wait(fd, CFIBER_EV_IN, remaining_ns(deadline));
             if (st == CFIBER_EV_READY) {
                 continue;
             }
@@ -636,7 +645,7 @@ static ssize_t write_impl(int fd, const void* buf, size_t n, int64_t timeout_ns)
             continue;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            cfiber_ev_status_t st = cfiber_ev_wait(fd, EPOLLOUT, remaining_ns(deadline));
+            cfiber_ev_status_t st = cfiber_ev_wait(fd, CFIBER_EV_OUT, remaining_ns(deadline));
             if (st == CFIBER_EV_READY) {
                 continue;
             }
@@ -673,7 +682,7 @@ int cfiber_ev_accept(int lfd, struct sockaddr* addr, socklen_t* alen) {
             continue;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            cfiber_ev_status_t st = cfiber_ev_wait(lfd, EPOLLIN, -1);
+            cfiber_ev_status_t st = cfiber_ev_wait(lfd, CFIBER_EV_IN, -1);
             if (st == CFIBER_EV_READY) {
                 continue;
             }
@@ -691,7 +700,7 @@ int cfiber_ev_connect(int fd, const struct sockaddr* addr, socklen_t alen) {
     if (errno != EINPROGRESS) {
         return -1;
     }
-    cfiber_ev_status_t st = cfiber_ev_wait(fd, EPOLLOUT, -1);
+    cfiber_ev_status_t st = cfiber_ev_wait(fd, CFIBER_EV_OUT, -1);
     if (st != CFIBER_EV_READY) {
         return wait_failed(st);
     }

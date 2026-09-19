@@ -38,9 +38,8 @@ static void echo(void* arg) {
 static void acceptor(void* arg) {
     int lfd = (int)(intptr_t)arg;
     for (;;) {
-        int fd = cfiber_ev_accept(lfd, nullptr, nullptr);
+        int fd = cfiber_ev_accept(lfd, nullptr, nullptr); /* already non-blocking */
         if (fd < 0) break;
-        cfiber_ev_set_nonblocking(fd);
         cfiber_ev_spawn(echo, (void*)(intptr_t)fd, nullptr);
     }
 }
@@ -65,10 +64,13 @@ loop keeps pooled for reuse instead of returning to the OS.
 cfiber_ev_status_t cfiber_ev_wait(int fd, uint32_t direction, int64_t timeout_ns);
 ```
 
-Read it as: park the current fiber until `fd` is ready in `direction` (`EPOLLIN`
-and/or `EPOLLOUT`), the timeout elapses, or the fiber is cancelled. The result is
-`CFIBER_EV_READY`, `CFIBER_EV_TIMEOUT`, `CFIBER_EV_CANCELLED`, or
-`CFIBER_EV_ERROR` with `errno` set.
+Read it as: park the current fiber until `fd` is ready in `direction`
+(`CFIBER_EV_IN`, `CFIBER_EV_OUT` or both), the timeout elapses, or the fiber is
+cancelled. The result is `CFIBER_EV_READY`, `CFIBER_EV_TIMEOUT`,
+`CFIBER_EV_CANCELLED`, or `CFIBER_EV_ERROR` with `errno` set. The direction
+bits are the reactor's own, not epoll's: nothing Linux-specific is in the API,
+and a stray poller flag is refused with `EINVAL` rather than silently changing
+the re-arm protocol.
 
 Everything else is layered on it. `cfiber_ev_read` / `_write` / `_accept` /
 `_connect` are a thin POSIX byte-stream *transport*: they attempt the syscall,
@@ -83,10 +85,16 @@ primitive rather than a change to the reactor.
 
 ## API
 
+Two prefixes, one rule: `cfiber_reactor_*` takes the reactor and is the
+host-side API (lifecycle from the owning thread, wake and cancel from any
+thread); `cfiber_ev_*` is the in-fiber API, acting on the reactor that runs the
+calling fiber. Where both exist, spawn, wake and cancel, they do the same thing
+from the two sides.
+
 | Call | Where from | Purpose |
 | ---- | ---------- | ------- |
 | `cfiber_reactor_create` / `_destroy` | host thread | Lifecycle |
-| `cfiber_reactor_spawn` | host thread | Seed fibers before (or during) the run |
+| `cfiber_reactor_spawn` | host thread | Seed fibers before a run, or between runs |
 | `cfiber_reactor_run` | host thread | Run until every fiber completes |
 | `cfiber_reactor_wake` / `_cancel` | any thread | Resume or cancel a parked fiber |
 | `cfiber_ev_spawn` | fiber | Spawn on the running reactor |
@@ -101,8 +109,8 @@ primitive rather than a change to the reactor.
 | `cfiber_ev_close` | fiber | Close, cancelling a parked waiter first |
 | `cfiber_ev_set_nonblocking` | anywhere | Utility |
 
-The in-fiber `cfiber_ev_*` calls operate on the calling thread's running reactor
-implicitly, which is why they take no reactor argument.
+`cfiber_ev_accept` hands back descriptors that are already non-blocking and
+close-on-exec, so nothing needs to be done to them before spawning a fiber.
 
 ## Scheduling
 

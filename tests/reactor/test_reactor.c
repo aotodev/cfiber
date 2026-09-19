@@ -21,7 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
@@ -818,7 +817,7 @@ static void slow_drain_writer_fiber(void* arg) {
     st->writer_done = 1;
 }
 
-/* Empties the socket buffer every 40 ms, so the writer gets EPOLLOUT well
+/* Empties the socket buffer every 40 ms, so the writer becomes writable well
  * inside a per-retry timeout of 100 ms and progresses a buffer per tick; only
  * a total deadline ends the write before the seconds the whole 8 MiB take. */
 static void slow_drain_reader_fiber(void* arg) {
@@ -906,7 +905,7 @@ static int test_in_fiber_api_off_loop_thread(void) {
     ASSERT_EQ_U32(cfiber_ev_sleep(0), CFIBER_EV_ERROR);
     ASSERT_EQ_U32(errno, EINVAL);
     errno = 0;
-    ASSERT_EQ_U32(cfiber_ev_wait(0, EPOLLIN, 0), CFIBER_EV_ERROR);
+    ASSERT_EQ_U32(cfiber_ev_wait(0, CFIBER_EV_IN, 0), CFIBER_EV_ERROR);
     ASSERT_EQ_U32(errno, EINVAL);
     errno = 0;
     ASSERT_FALSE(cfiber_ev_spawn(trivial_fiber, nullptr, nullptr));
@@ -916,6 +915,57 @@ static int test_in_fiber_api_off_loop_thread(void) {
     return 0;
 }
 #endif
+
+/* ============================================================================
+ * direction bits: only CFIBER_EV_IN / CFIBER_EV_OUT are accepted
+ * ============================================================================ */
+
+typedef struct {
+    int fd;
+    cfiber_ev_status_t none_st;
+    int none_errno;
+    cfiber_ev_status_t stray_st;
+    int stray_errno;
+    cfiber_ev_status_t both_st; /* IN|OUT on a writable socket: ready at once */
+} direction_state;
+
+static direction_state g_dir;
+
+static void direction_fiber(void* arg) {
+    direction_state* st = arg;
+    st->none_st = cfiber_ev_wait(st->fd, 0, -1);
+    st->none_errno = errno;
+    st->stray_st = cfiber_ev_wait(st->fd, CFIBER_EV_IN | (1u << 31), -1);
+    st->stray_errno = errno;
+    st->both_st = cfiber_ev_wait(st->fd, CFIBER_EV_IN | CFIBER_EV_OUT, ms_to_ns(500));
+}
+
+static int test_direction_bits_validated(void) {
+    memset(&g_dir, 0, sizeof g_dir);
+    g_dir.none_st = CFIBER_EV_READY;
+    g_dir.stray_st = CFIBER_EV_READY;
+    g_dir.both_st = CFIBER_EV_ERROR;
+
+    int fds[2];
+    ASSERT_EQ_U32(make_pair(fds), 0);
+    g_dir.fd = fds[0];
+
+    cfiber_reactor_t* r = make_reactor();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(cfiber_reactor_spawn(r, direction_fiber, &g_dir, nullptr));
+    cfiber_reactor_run(r);
+
+    ASSERT_EQ_U32(g_dir.none_st, CFIBER_EV_ERROR);
+    ASSERT_EQ_U32(g_dir.none_errno, EINVAL);
+    ASSERT_EQ_U32(g_dir.stray_st, CFIBER_EV_ERROR);
+    ASSERT_EQ_U32(g_dir.stray_errno, EINVAL);
+    ASSERT_EQ_U32(g_dir.both_st, CFIBER_EV_READY);
+
+    close(fds[0]);
+    close(fds[1]);
+    cfiber_reactor_destroy(r);
+    return 0;
+}
 
 /* ============================================================================
  * loop fairness: yield loops must not starve timers, I/O or commands
@@ -1255,7 +1305,7 @@ static void busy_first_fiber(void* arg) {
 static void busy_second_fiber(void* arg) {
     int fd = (int)(intptr_t)arg;
     cfiber_ev_yield(); /* let the first fiber park */
-    g_busy_st = cfiber_ev_wait(fd, EPOLLIN, -1);
+    g_busy_st = cfiber_ev_wait(fd, CFIBER_EV_IN, -1);
     g_busy_errno = errno;
 }
 
@@ -1326,6 +1376,7 @@ int main(void) {
     RUN_TEST(test_run_reports_poller_failure);
     RUN_TEST(test_run_twice);
     RUN_TEST(test_nested_reactor);
+    RUN_TEST(test_direction_bits_validated);
     RUN_TEST(test_wake_does_not_resume_fd_park);
     RUN_TEST(test_wake_does_not_cut_sleep);
     RUN_TEST(test_wake_before_wait_async_is_kept);
