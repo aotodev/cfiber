@@ -29,7 +29,7 @@ storage rather than being heap-allocated.
 ```c
 cfiber_scheduler_t sched;
 cfiber_scheduler_init(&sched, (cfiber_scheduler_config_t){
-    .stack_size      = 8192,   /* per fiber; >= 256 and a multiple of the cache line */
+    .stack_size      = 8192,   /* usable bytes per fiber, >= 256 */
     .fibers_per_slab = 16,     /* 0 selects the default of 16 */
     .max_slabs       = 0,      /* 0 means unlimited */
 });

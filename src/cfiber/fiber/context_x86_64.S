@@ -1,9 +1,9 @@
 .intel_syntax noprefix
 
-.global switch_context
-.type switch_context, @function
+.global cfiber_switch_context
+.type cfiber_switch_context, @function
 
-switch_context:
+cfiber_switch_context:
     # Save current context (first parameter in %rdi)
     mov     [rdi + 0x00], rsp
     mov     [rdi + 0x08], r15
@@ -29,6 +29,6 @@ switch_context:
 
     ret
 
-.size switch_context, .-switch_context
+.size cfiber_switch_context, .-cfiber_switch_context
 
 .section .note.GNU-stack, "", @progbits

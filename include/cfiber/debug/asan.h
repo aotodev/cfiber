@@ -14,7 +14,7 @@
  *
  *            2. The fiber-switch annotation pair
  *               (__sanitizer_start_switch_fiber / __sanitizer_finish_switch_fiber).
- *               When we swap the stack pointer in switch_context(), ASan's notion
+ *               When we swap the stack pointer in cfiber_switch_context(), ASan's notion
  *               of "the current stack" goes stale, which breaks
  *               detect_stack_use_after_return and produces false reports.  The
  *               annotations keep ASan in sync across every context switch.
@@ -26,7 +26,7 @@
  *       the build system enforces this.
  *
  * @note When ASan is not enabled every entry point degrades to a zero-overhead
- *       inline that simply forwards to switch_context(), so callers need no
+ *       inline that simply forwards to cfiber_switch_context(), so callers need no
  *       conditional compilation of their own.
  *
  * @note The gate is CFIBER_ASAN_ENABLED, defined by the build (CFIBER_ASAN and
@@ -88,7 +88,7 @@ extern "C" {
  *          library and any consumer, since it determines the stack block layout.
  */
 #ifndef CFIBER_ASAN_REDZONE
-#define CFIBER_ASAN_REDZONE ((size_t)CACHE_LINE_SIZE)
+#define CFIBER_ASAN_REDZONE ((size_t)CFIBER_CACHE_LINE_SIZE)
 #endif
 
 /** @brief Poison @p size bytes starting at @p addr (mark as off-limits). */
@@ -102,7 +102,7 @@ CFIBER_ASAN_INLINE void cfiber_asan_unpoison(const void* addr, size_t size) {
 }
 
 /**
- * @brief ASan-aware context switch wrapper around switch_context().
+ * @brief ASan-aware context switch wrapper around cfiber_switch_context().
  * @param from          Context to save the outgoing fiber into.
  * @param to            Context to restore and switch to.
  * @param to_stack_low  Lowest address of the target fiber's usable stack.
@@ -110,7 +110,7 @@ CFIBER_ASAN_INLINE void cfiber_asan_unpoison(const void* addr, size_t size) {
  * @param finishing     true if the outgoing fiber is terminating; ASan then
  *                      discards its fake stack instead of saving it.
  *
- * @details Brackets switch_context() with __sanitizer_start_switch_fiber()
+ * @details Brackets cfiber_switch_context() with __sanitizer_start_switch_fiber()
  *          (before) and __sanitizer_finish_switch_fiber() (after we are resumed
  *          on the outgoing fiber's stack).  The fake-stack save slot is a frame
  *          local, which is correct because start/finish always bracket the same
@@ -120,9 +120,11 @@ CFIBER_ASAN_INLINE void cfiber_asan_unpoison(const void* addr, size_t size) {
  *       __sanitizer_finish_switch_fiber() is issued by
  *       cfiber_asan_on_fiber_entry() from the assembly prologue instead.
  */
-CFIBER_EXPORT void
-cfiber_asan_switch(context_t* from, context_t* to, const void* to_stack_low, size_t to_stack_size, bool finishing)
-    __attribute__((nonnull(1, 2)));
+CFIBER_EXPORT void cfiber_asan_switch(cfiber_context_t* from,
+                                      cfiber_context_t* to,
+                                      const void* to_stack_low,
+                                      size_t to_stack_size,
+                                      bool finishing) __attribute__((nonnull(1, 2)));
 
 /**
  * @brief First-entry hook invoked from the fiber assembly prologue.
@@ -182,12 +184,15 @@ CFIBER_ASAN_INLINE void cfiber_asan_unpoison(const void* addr, size_t size) {
     (void)size;
 }
 
-CFIBER_ASAN_INLINE void
-cfiber_asan_switch(context_t* from, context_t* to, const void* to_stack_low, size_t to_stack_size, bool finishing) {
+CFIBER_ASAN_INLINE void cfiber_asan_switch(cfiber_context_t* from,
+                                           cfiber_context_t* to,
+                                           const void* to_stack_low,
+                                           size_t to_stack_size,
+                                           bool finishing) {
     (void)to_stack_low;
     (void)to_stack_size;
     (void)finishing;
-    switch_context(from, to);
+    cfiber_switch_context(from, to);
 }
 
 CFIBER_ASAN_INLINE void cfiber_asan_host_bounds(const void** low, size_t* size) {

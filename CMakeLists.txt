@@ -28,7 +28,7 @@ option(CFIBER_REACTOR                   "Build the optional epoll(7) reactor sch
 set(CFIBER_ASAN_REDZONE "" CACHE STRING
     "Size in bytes of the poisoned guard below each fiber stack (default: one cache line). Only used when CFIBER_ASAN is ON.")
 set(CFIBER_BITMAP_SIZE 8 CACHE STRING
-    "Bitmap words per slab; caps blocks per slab at BITMAP_WORD_BITS * CFIBER_BITMAP_SIZE. Part of the ABI.")
+    "Bitmap words per slab; caps blocks per slab at CFIBER_BITMAP_WORD_BITS * CFIBER_BITMAP_SIZE. Part of the ABI.")
 option(CFIBER_BUILD_SHARED              "Build cfiber as a shared library (default: static)" OFF)
 option(CFIBER_POSITION_INDEPENDENT_CODE "Build the static library with -fPIC (ignored when shared)" OFF)
 
@@ -136,9 +136,10 @@ target_include_directories(cfiber PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+target_include_directories(cfiber PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-# PUBLIC: the value sizes slab_t and everything embedding it.
-target_compile_definitions(cfiber PUBLIC "BITMAP_SIZE=${CFIBER_BITMAP_SIZE}U")
+# PUBLIC: the value sizes cfiber_slab_t and everything embedding it.
+target_compile_definitions(cfiber PUBLIC "CFIBER_BITMAP_SIZE=${CFIBER_BITMAP_SIZE}U")
 
 # The warning flags as PRIVATE options rather than a link to project_flags, so the
 # exported target does not reference an unexported interface library.
@@ -317,7 +318,7 @@ elseif(_cfiber_arch STREQUAL "arm")
     # ABI/arch-affecting flags: PUBLIC on the target so a parent project's own
     # translation units and link line get the same multilib and VFP ABI; the
     # directory-wide copies reach the startup objects that link no target.
-    # The FPU half of context_t follows the compiler's __ARM_FP.
+    # The FPU half of cfiber_context_t follows the compiler's __ARM_FP.
     set(_cfiber_arm_flags "")
     if(CFIBER_ARM_FLOAT_ABI)
         list(APPEND _cfiber_arm_flags -mfloat-abi=${CFIBER_ARM_FLOAT_ABI})
@@ -375,6 +376,7 @@ if(CFIBER_REACTOR)
     target_sources(cfiber_reactor PRIVATE
         ${_cfiber_src_dir}/reactor/reactor.c
     )
+    target_include_directories(cfiber_reactor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_definitions(cfiber_reactor PRIVATE _GNU_SOURCE)
     target_link_libraries(cfiber_reactor PUBLIC cfiber Threads::Threads)
     target_compile_options(cfiber_reactor PRIVATE $<TARGET_PROPERTY:project_flags,INTERFACE_COMPILE_OPTIONS>)

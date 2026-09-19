@@ -25,7 +25,7 @@
  */
 #include "cfiber/reactor/reactor.h"
 
-#include "cfiber/core/macros.h"
+#include "cfiber/core/internal.h"
 #include "cfiber/debug/asan.h"
 #include "cfiber/debug/tsan.h"
 #include "cfiber/fiber/context.h"
@@ -78,8 +78,8 @@ typedef enum {
 typedef enum { PARK_FD, PARK_TIMER, PARK_ASYNC } park_kind_t;
 
 struct cfiber_reactor_fiber {
-    fiber_t fiber;  /* cfiber context + stack pointer/size        */
-    cstack_t stack; /* backing growable stack (mmap + guard page) */
+    cfiber_t fiber;       /* cfiber context + stack pointer/size        */
+    cfiber_stack_t stack; /* backing growable stack (mmap + guard page) */
 
     struct cfiber_reactor_fiber* next; /* ready-queue / free-list link */
 
@@ -128,10 +128,10 @@ typedef struct {
 typedef struct {
     /* Producer and consumer cursors on their own cache lines; cells and mask
      * are read-only after init, so sharing the producer line costs nothing. */
-    _Alignas(CACHE_LINE_SIZE) _Atomic size_t enqueue_pos;
+    _Alignas(CFIBER_CACHE_LINE_SIZE) _Atomic size_t enqueue_pos;
     cmd_cell_t* cells;
     size_t mask; /* capacity - 1 (capacity is a power of two) */
-    _Alignas(CACHE_LINE_SIZE) _Atomic size_t dequeue_pos;
+    _Alignas(CFIBER_CACHE_LINE_SIZE) _Atomic size_t dequeue_pos;
 } cmd_ring_t;
 
 struct cfiber_reactor {
@@ -140,8 +140,8 @@ struct cfiber_reactor {
      * directly instead of being routed through the ring + eventfd. */
     cmd_ring_t cmds;
 
-    context_t loop_ctx; /* the run loop's own (host) context */
-    void* loop_tsan;    /* TSan context of the stack running the loop */
+    cfiber_context_t loop_ctx; /* the run loop's own (host) context */
+    void* loop_tsan;           /* TSan context of the stack running the loop */
     ev_fiber_t* current;
     ev_fiber_t* zombie;
 
@@ -154,9 +154,9 @@ struct cfiber_reactor {
      * fiber; a freed slab would dangle an outstanding handle. The slab's
      * bitmap free list leaves block contents intact, so a recycled block keeps
      * its generation counter. */
-    multislab_t fibers;
+    cfiber_multislab_t fibers;
 
-    growable_stack_allocator_t* stacks;
+    cfiber_growable_stack_allocator_t* stacks;
     size_t stack_size;
 
     /* Timer min-heap keyed by deadline_ns. */
@@ -336,7 +336,7 @@ static void enter_fiber(cfiber_reactor_t* s, ev_fiber_t* f) {
     s->current = f;
     f->state = FB_RUNNING;
     cfiber_tsan_switch_to(f->tsan);
-    cfiber_asan_switch(&s->loop_ctx, &f->fiber.ctx, f->stack.usable_base, cstack_usable_size(&f->stack), false);
+    cfiber_asan_switch(&s->loop_ctx, &f->fiber.ctx, f->stack.usable_base, cfiber_stack_usable_size(&f->stack), false);
     /* control returns here when f yields, parks, or completes */
 }
 
@@ -748,7 +748,7 @@ int cfiber_ev_close(int fd) {
  * ============================================================================ */
 
 static ev_fiber_t* fiber_obtain(cfiber_reactor_t* s) {
-    ev_fiber_t* f = multislab_alloc(&s->fibers);
+    ev_fiber_t* f = cfiber_multislab_alloc(&s->fibers);
     if (!f) {
         return nullptr;
     }
@@ -786,13 +786,13 @@ static void live_unlink(cfiber_reactor_t* s, ev_fiber_t* f) {
 static void fiber_repool(cfiber_reactor_t* s, ev_fiber_t* f) {
     f->generation++; /* invalidate outstanding handles */
     f->state = FB_FREE;
-    multislab_release(&s->fibers, f);
+    cfiber_multislab_release(&s->fibers, f);
 }
 
 static void fiber_recycle(cfiber_reactor_t* s, ev_fiber_t* f) {
     detach_fd(s, f); /* a registration left by the last wait */
     live_unlink(s, f);
-    growable_stack_release(s->stacks, &f->stack);
+    cfiber_growable_stack_release(s->stacks, &f->stack);
     cfiber_tsan_destroy(f->tsan);
     fiber_repool(s, f);
 }
@@ -933,20 +933,19 @@ static bool spawn_locked(cfiber_reactor_t* s, cfiber_reactor_fn fn, void* arg, c
         return false;
     }
 
-    f->stack = growable_stack_alloc(s->stacks);
+    f->stack = cfiber_growable_stack_alloc(s->stacks);
     if (!f->stack.mem_base) {
         fiber_repool(s, f); /* no stack to release */
         return false;
     }
 
     f->fiber.stack = f->stack.usable_base; /* above the guard page */
-    f->fiber.stack_size = cstack_usable_size(&f->stack);
+    f->fiber.stack_size = cfiber_stack_usable_size(&f->stack);
     f->reg_fd = -1;
     f->wait_fd = -1;
     f->timer_i = NO_TIMER;
-    memset(&f->fiber.ctx, 0, sizeof(context_t));
 
-    init_fiber(&f->fiber, (fiber_fn)fn, arg);
+    cfiber_init(&f->fiber, (cfiber_fn)fn, arg);
     f->tsan = cfiber_tsan_create();
     live_link(s, f);
     enqueue(s, f);
@@ -1182,8 +1181,8 @@ cfiber_reactor_t* cfiber_reactor_create(cfiber_reactor_config_t config) {
     /* Grow-only fiber pool: max_slabs = 0 (unlimited), and an effectively
      * infinite empty-slab reserve so no slab is ever returned to the OS
      * (outstanding handles point into these blocks). */
-    const size_t block = align_up(sizeof(ev_fiber_t), CACHE_LINE_SIZE);
-    if (multislab_init_ext(
+    const size_t block = align_up(sizeof(ev_fiber_t), CFIBER_CACHE_LINE_SIZE);
+    if (cfiber_multislab_init_ext(
             &s->fibers, block, DEFAULT_FIBERS_PER_SLAB, 0, UINT32_MAX, zeroing_alloc, zeroing_free, nullptr)) {
         free(s);
         return nullptr;
@@ -1208,7 +1207,7 @@ cfiber_reactor_t* cfiber_reactor_create(cfiber_reactor_config_t config) {
         goto fail;
     }
 
-    s->stacks = growable_stack_allocator_create((growable_stack_allocator_args_t){
+    s->stacks = cfiber_growable_stack_allocator_create((cfiber_growable_stack_allocator_args_t){
         .max_stack_size = maxs,
         .cache_capacity = config.stack_cache ? config.stack_cache : 64,
         .initial_cached = 0,
@@ -1228,7 +1227,7 @@ fail:
         close(s->epfd);
     }
     ring_destroy(&s->cmds);
-    multislab_destroy(&s->fibers);
+    cfiber_multislab_destroy(&s->fibers);
     free(s);
     return nullptr;
 }
@@ -1244,18 +1243,18 @@ void cfiber_reactor_destroy(cfiber_reactor_t* r) {
      * parked/ready by a failed run) are discarded without resuming, so their
      * stacks are released here rather than leaked. */
     for (ev_fiber_t* f = s->live_head; f; f = f->live_next) {
-        growable_stack_release(s->stacks, &f->stack);
+        cfiber_growable_stack_release(s->stacks, &f->stack);
         cfiber_tsan_destroy(f->tsan);
     }
     s->live_head = nullptr;
 
-    multislab_destroy(&s->fibers); /* frees every fiber block */
+    cfiber_multislab_destroy(&s->fibers); /* frees every fiber block */
     ring_destroy(&s->cmds);
     free((void*)s->heap);
     free((void*)s->fd_owner);
 
     if (s->stacks) {
-        const int leaked = growable_stack_allocator_destroy(s->stacks);
+        const int leaked = cfiber_growable_stack_allocator_destroy(s->stacks);
         ASSERT(leaked == 0);
         (void)leaked;
     }

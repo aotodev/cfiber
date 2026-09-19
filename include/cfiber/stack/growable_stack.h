@@ -27,17 +27,17 @@ extern "C" {
 /**
  * @brief Create a new growable stack.
  * @param max_size Usable size of the stack: non-zero and page-aligned.
- * @return A cstack_t descriptor, or a zeroed one on failure with errno set:
+ * @return A cfiber_stack_t descriptor, or a zeroed one on failure with errno set:
  *         EINVAL for a bad size, otherwise the mmap/mprotect error. The guard
  *         page lies below usable_base, inside the allocation.
  */
-[[nodiscard]] CFIBER_EXPORT cstack_t cstack_growable_create(size_t max_size);
+[[nodiscard]] CFIBER_EXPORT cfiber_stack_t cfiber_growable_stack_create(size_t max_size);
 
 /**
  * @brief Destroy a growable stack and release all memory.
  * @param stack The stack to destroy
  */
-CFIBER_EXPORT void cstack_growable_destroy(cstack_t* stack);
+CFIBER_EXPORT void cfiber_growable_stack_destroy(cfiber_stack_t* stack);
 
 /**
  * @brief Recycle a growable stack by releasing grown pages.
@@ -45,7 +45,7 @@ CFIBER_EXPORT void cstack_growable_destroy(cstack_t* stack);
  *          Useful for reusing stacks without full deallocation.
  * @param stack The stack to recycle
  */
-CFIBER_EXPORT void cstack_growable_recycle(cstack_t* stack);
+CFIBER_EXPORT void cfiber_growable_stack_recycle(cfiber_stack_t* stack);
 
 #ifdef __cplusplus
 }

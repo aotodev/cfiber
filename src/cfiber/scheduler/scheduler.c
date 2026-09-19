@@ -1,5 +1,6 @@
 #include "cfiber/scheduler/scheduler.h"
 
+#include "cfiber/core/internal.h"
 #include "cfiber/debug/asan.h"
 #include "cfiber/stack/debug/stack_sanitize.h"
 #include "cfiber/stack/fixed_size_stack_allocator.h"
@@ -49,17 +50,17 @@ static inline cfiber_task_t* dequeue_ready(cfiber_scheduler_t* s) {
 
 static void task_free(cfiber_scheduler_t* s, cfiber_task_t* t) {
 #if CFIBER_STACK_SANITIZER
-    const size_t used = cstack_debug_stack_used_bytes(&t->stack);
+    const size_t used = cfiber_stack_debug_used_bytes(&t->stack);
     if (used > s->stack_peak) {
         s->stack_peak = used;
     }
 #endif
-    if (UNLIKELY(!ms_stack_release(&t->stack, &s->stack_alloc))) {
+    if (UNLIKELY(!cfiber_fixed_stack_release(&t->stack, &s->stack_alloc))) {
         /* Overflow found by the stack sanitizer: neighbouring blocks may be
          * corrupt, so stop here in every build. t and t->stack are in scope. */
         __builtin_trap();
     }
-    multislab_release(&s->task_alloc, t);
+    cfiber_multislab_release(&s->task_alloc, t);
 }
 
 /* ============================================================================
@@ -110,14 +111,14 @@ int cfiber_scheduler_init_ext(cfiber_scheduler_t* sched,
     sched->stack_size = config.stack_size;
 
     const uint32_t per_slab = config.fibers_per_slab ? config.fibers_per_slab : DEFAULT_PER_SLAB;
-    const size_t task_block = align_up(sizeof(cfiber_task_t), CACHE_LINE_SIZE);
+    const size_t task_block = align_up(sizeof(cfiber_task_t), CFIBER_CACHE_LINE_SIZE);
 
     int rc;
     if (mem_alloc && mem_free) {
-        rc = multislab_init_ext(
+        rc = cfiber_multislab_init_ext(
             &sched->task_alloc, task_block, per_slab, config.max_slabs, 1, mem_alloc, mem_free, mem_ctx);
     } else {
-        rc = multislab_init(&sched->task_alloc, task_block, per_slab, config.max_slabs, 1);
+        rc = cfiber_multislab_init(&sched->task_alloc, task_block, per_slab, config.max_slabs, 1);
     }
     if (rc) {
         return rc;
@@ -128,16 +129,16 @@ int cfiber_scheduler_init_ext(cfiber_scheduler_t* sched,
      * redzone is added on top of the requested usable size and rounds back up
      * to the cache-line granularity the slab requires. REDZONE is 0 (and the
      * block size unchanged) when ASan is disabled. */
-    const size_t stack_block = align_up(config.stack_size + CFIBER_ASAN_REDZONE, CACHE_LINE_SIZE);
+    const size_t stack_block = align_up(config.stack_size + CFIBER_ASAN_REDZONE, CFIBER_CACHE_LINE_SIZE);
 
     if (mem_alloc && mem_free) {
-        rc = multislab_init_ext(
+        rc = cfiber_multislab_init_ext(
             &sched->stack_alloc, stack_block, per_slab, config.max_slabs, 1, mem_alloc, mem_free, mem_ctx);
     } else {
-        rc = multislab_init(&sched->stack_alloc, stack_block, per_slab, config.max_slabs, 1);
+        rc = cfiber_multislab_init(&sched->stack_alloc, stack_block, per_slab, config.max_slabs, 1);
     }
     if (rc) {
-        multislab_destroy(&sched->task_alloc);
+        cfiber_multislab_destroy(&sched->task_alloc);
         return rc;
     }
 
@@ -151,28 +152,27 @@ int cfiber_scheduler_init(cfiber_scheduler_t* sched, cfiber_scheduler_config_t c
 void cfiber_scheduler_destroy(cfiber_scheduler_t* sched) {
     ASSERT(sched->active_count == 0 && "destroying scheduler with live fibers");
 
-    multislab_destroy(&sched->task_alloc);
-    multislab_destroy(&sched->stack_alloc);
+    cfiber_multislab_destroy(&sched->task_alloc);
+    cfiber_multislab_destroy(&sched->stack_alloc);
     memset(sched, 0, sizeof(*sched));
 }
 
-bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, fiber_fn func, void* user_data) {
-    cfiber_task_t* task = multislab_alloc(&sched->task_alloc);
+bool cfiber_scheduler_spawn(cfiber_scheduler_t* sched, cfiber_fn func, void* user_data) {
+    cfiber_task_t* task = cfiber_multislab_alloc(&sched->task_alloc);
     if (UNLIKELY(!task)) {
         return false;
     }
 
-    if (UNLIKELY(ms_stack_alloc(&task->stack, &sched->stack_alloc))) {
-        multislab_release(&sched->task_alloc, task);
+    if (UNLIKELY(cfiber_fixed_stack_alloc(&task->stack, &sched->stack_alloc))) {
+        cfiber_multislab_release(&sched->task_alloc, task);
         return false;
     }
 
     task->fiber.stack = task->stack.usable_base;
     task->fiber.stack_size = sched->stack_size;
-    memset(&task->fiber.ctx, 0, sizeof(context_t));
     task->next = nullptr;
 
-    init_fiber(&task->fiber, func, user_data);
+    cfiber_init(&task->fiber, func, user_data);
 
     enqueue_ready(sched, task);
     sched->active_count++;
@@ -200,7 +200,10 @@ void cfiber_scheduler_run(cfiber_scheduler_t* sched) {
 
         cfiber_task_t* next = dequeue_ready(sched);
         if (UNLIKELY(!next)) {
-            break; /* shouldn't happen, but guard against it */
+            /* Live fibers but an empty ready queue: one switched to sched_ctx
+             * by hand instead of yielding. Nothing left to run, nothing to
+             * return to. */
+            __builtin_trap();
         }
 
         sched->current = next;
@@ -257,7 +260,7 @@ void cfiber_yield(void) {
     cfiber_asan_switch(&cur->fiber.ctx, &s->sched_ctx, host_low, host_size, false);
 }
 
-bool cfiber_spawn(fiber_fn func, void* user_data) {
+bool cfiber_spawn(cfiber_fn func, void* user_data) {
     cfiber_scheduler_t* s = s_current_sched;
     ASSERT(s && "cfiber_spawn: no active scheduler");
     if (UNLIKELY(!s)) {

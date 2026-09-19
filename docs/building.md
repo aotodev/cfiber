@@ -108,7 +108,7 @@ target_link_libraries(my_app PRIVATE cfiber::cfiber)        # and cfiber::reacto
 ```
 
 or `pkg-config --cflags --libs cfiber`. The exported targets carry the PUBLIC
-definitions and options of the build that was installed (`BITMAP_SIZE`,
+definitions and options of the build that was installed (`CFIBER_BITMAP_SIZE`,
 sanitizer flags, the ARM float ABI), so a consumer matches it without repeating
 them. `tests/consumer/` is the smoke test CI runs against a staged install.
 

@@ -1,42 +1,44 @@
 #include "cfiber/memory/slab_alloc.h"
 
+#include "cfiber/core/internal.h"
+
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#define INDEX_BITMAP(x) ((x) / BITMAP_WORD_BITS)
-#define INDEX_TO_BIT(x) ((bitmap_t)1 << ((x) & (BITMAP_WORD_BITS - 1)))
+#define INDEX_BITMAP(x) ((x) / CFIBER_BITMAP_WORD_BITS)
+#define INDEX_TO_BIT(x) ((cfiber_bitmap_t)1 << ((x) & (CFIBER_BITMAP_WORD_BITS - 1)))
 
-static inline uint32_t ptr_to_index(const slab_t* slab, const void* ptr) {
+static inline uint32_t ptr_to_index(const cfiber_slab_t* slab, const void* ptr) {
     return (uint32_t)(((uintptr_t)ptr - (uintptr_t)slab->memory) / slab->block_size);
 }
 
-static inline void* index_to_ptr(const slab_t* slab, const uint32_t index) {
+static inline void* index_to_ptr(const cfiber_slab_t* slab, const uint32_t index) {
     return (void*)((uintptr_t)slab->memory + ((uintptr_t)index * slab->block_size));
 }
 
-static inline bool bitmap_test(const bitmap_t* bitmap, const uint32_t index) {
+static inline bool bitmap_test(const cfiber_bitmap_t* bitmap, const uint32_t index) {
     return !!(bitmap[INDEX_BITMAP(index)] & INDEX_TO_BIT(index));
 }
 
-static inline void bitmap_set(bitmap_t* bitmap, const uint32_t index) {
+static inline void bitmap_set(cfiber_bitmap_t* bitmap, const uint32_t index) {
     bitmap[INDEX_BITMAP(index)] |= INDEX_TO_BIT(index);
 }
 
-static inline void bitmap_clear(bitmap_t* bitmap, const uint32_t index) {
+static inline void bitmap_clear(cfiber_bitmap_t* bitmap, const uint32_t index) {
     bitmap[INDEX_BITMAP(index)] &= ~INDEX_TO_BIT(index);
 }
 
-static inline int bitmap_find_free(const bitmap_t* bitmap, const uint32_t words, const uint32_t capacity) {
+static inline int bitmap_find_free(const cfiber_bitmap_t* bitmap, const uint32_t words, const uint32_t capacity) {
     for (uint32_t i = 0; i < words; i++) {
-        const bitmap_t inv = ~bitmap[i];
+        const cfiber_bitmap_t inv = ~bitmap[i];
         if (inv) {
-#if BITMAP_WORD_BITS == 64
+#if CFIBER_BITMAP_WORD_BITS == 64
             const int bit = __builtin_ctzll((unsigned long long)inv);
 #else
             const int bit = __builtin_ctz((unsigned int)inv);
 #endif
-            const uint32_t index = (i * BITMAP_WORD_BITS) + (uint32_t)bit;
+            const uint32_t index = (i * CFIBER_BITMAP_WORD_BITS) + (uint32_t)bit;
             if (index < capacity) {
                 return (int)index;
             }
@@ -45,18 +47,18 @@ static inline int bitmap_find_free(const bitmap_t* bitmap, const uint32_t words,
     return -1;
 }
 
-int slab_init(slab_t* alloc, size_t block_size, void* memory, size_t memory_size) {
-    if (UNLIKELY(!block_size || (block_size % CACHE_LINE_SIZE) || memory_size < block_size)) {
+int cfiber_slab_init(cfiber_slab_t* alloc, size_t block_size, void* memory, size_t memory_size) {
+    if (UNLIKELY(!block_size || (block_size % CFIBER_CACHE_LINE_SIZE) || memory_size < block_size)) {
         ASSERT(false && "Invalid block size or memory size");
         return -1;
     }
-    /* The canary and init_fiber rely on the base alignment of every block. */
+    /* The canary and cfiber_init rely on the base alignment of every block. */
     if (UNLIKELY((uintptr_t)memory % alignof(max_align_t))) {
         ASSERT(false && "slab memory must be aligned to max_align_t");
         return -1;
     }
     const size_t count = memory_size / block_size; /* checked before narrowing */
-    if (UNLIKELY(count > MAX_BLOCK_COUNT)) {
+    if (UNLIKELY(count > CFIBER_SLAB_MAX_BLOCKS)) {
         ASSERT(false && "Exceeded max block count for bitmap");
         return -1;
     }
@@ -64,15 +66,15 @@ int slab_init(slab_t* alloc, size_t block_size, void* memory, size_t memory_size
     alloc->memory = memory;
     alloc->block_size = block_size;
     alloc->block_count = (uint32_t)count;
-    /* calculate how many BITMAP_WORD_BITS words we actually need to iterate through */
-    alloc->bitmap_count = (alloc->block_count + BITMAP_WORD_BITS - 1) / BITMAP_WORD_BITS;
+    /* calculate how many CFIBER_BITMAP_WORD_BITS words we actually need to iterate through */
+    alloc->bitmap_count = (alloc->block_count + CFIBER_BITMAP_WORD_BITS - 1) / CFIBER_BITMAP_WORD_BITS;
 
-    memset(alloc->bitmap, 0, BITMAP_SIZE * sizeof(bitmap_t));
+    memset(alloc->bitmap, 0, CFIBER_BITMAP_SIZE * sizeof(cfiber_bitmap_t));
 
     return 0;
 }
 
-void* slab_alloc(slab_t* slab) {
+void* cfiber_slab_alloc(cfiber_slab_t* slab) {
     const int index = bitmap_find_free(slab->bitmap, slab->bitmap_count, slab->block_count);
     if (UNLIKELY(index < 0)) {
         return nullptr;
@@ -81,7 +83,7 @@ void* slab_alloc(slab_t* slab) {
     return index_to_ptr(slab, (uint32_t)index);
 }
 
-bool slab_release(slab_t* slab, void* block) {
+bool cfiber_slab_release(cfiber_slab_t* slab, void* block) {
 #if CFIBER_DEFENSIVE
     const size_t total_memory_size = slab->block_size * slab->block_count;
     const uintptr_t b = (uintptr_t)block;
@@ -110,6 +112,6 @@ bool slab_release(slab_t* slab, void* block) {
     return true;
 }
 
-void slab_reset(slab_t* alloc) {
-    memset(alloc->bitmap, 0, BITMAP_SIZE * sizeof(bitmap_t));
+void cfiber_slab_reset(cfiber_slab_t* alloc) {
+    memset(alloc->bitmap, 0, CFIBER_BITMAP_SIZE * sizeof(cfiber_bitmap_t));
 }

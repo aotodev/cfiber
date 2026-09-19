@@ -12,24 +12,36 @@
  *
  * @section usage Basic Usage
  *   1. Allocate a stack for the fiber.
- *   2. Create a fiber_t structure and set stack/stack_size.
- *   3. Call init_fiber() with your fiber function and user data.
- *   4. Use switch_context() to switch between fibers.
+ *   2. Create a cfiber_t structure and set stack/stack_size.
+ *   3. Call cfiber_init() with your fiber function and user data.
+ *   4. Use cfiber_switch_context() to switch between fibers.
  *   5. Register a fiber-return hook with cfiber_set_return_hook() to handle
  *      fiber completion.
  *
  * @section example Example
  * @code
- * void my_fiber_func(void* data) {
- *     printf("Fiber running with data: %p\n", data);
- *     yield();
+ * static cfiber_context_t main_ctx;
+ * static cfiber_t fiber;
+ * static uint8_t stack[8192];
+ *
+ * static void on_return(void* ctx) {
+ *     (void)ctx;
+ *     cfiber_switch_context(&fiber.ctx, &main_ctx); // never resumed
  * }
  *
- * fiber_t fiber = {
- *     .stack = malloc(8192),
- *     .stack_size = 8192
- * };
- * init_fiber(&fiber, my_fiber_func, my_data);
+ * static void my_fiber_func(void* data) {
+ *     printf("running with %p\n", data);
+ *     cfiber_switch_context(&fiber.ctx, &main_ctx); // yield to main
+ *     printf("resumed\n");
+ * }
+ *
+ * fiber.stack = stack;
+ * fiber.stack_size = sizeof stack;
+ * cfiber_init(&fiber, my_fiber_func, my_data);
+ * cfiber_set_return_hook(on_return, nullptr);
+ *
+ * cfiber_switch_context(&main_ctx, &fiber.ctx); // runs until the yield
+ * cfiber_switch_context(&main_ctx, &fiber.ctx); // resumes; comes back via on_return
  * @endcode
  */
 
@@ -49,19 +61,19 @@ extern "C" {
  * @brief Fiber structure containing execution state and stack.
  * @details A fiber is a unit of execution with its own stack and CPU context.
  *          Before using a fiber, allocate its stack and initialize it with
- *          init_fiber().
+ *          cfiber_init().
  */
 typedef struct {
     /**
      * @brief CPU context (registers, stack pointer, etc).
      * @details Stores the fiber's execution state when it is not running.
-     *          Managed automatically by switch_context() and init_fiber().
+     *          Managed automatically by cfiber_switch_context() and cfiber_init().
      */
-    context_t ctx;
+    cfiber_context_t ctx;
 
     /**
      * @brief Pointer to the fiber's stack memory.
-     * @details Must be allocated by the user before calling init_fiber().
+     * @details Must be allocated by the user before calling cfiber_init().
      *          The stack grows downward from (stack + stack_size).
      *
      * @warning Must remain valid for the entire lifetime of the fiber.
@@ -82,11 +94,11 @@ typedef struct {
      * @warning Stack overflow leads to undefined behavior (crashes, corruption).
      */
     size_t stack_size;
-} fiber_t;
+} cfiber_t;
 
 /**
  * @brief Function signature for fiber entry points.
- * @param user_data Pointer to user-defined data, passed from init_fiber().
+ * @param user_data Pointer to user-defined data, passed from cfiber_init().
  *
  * @details The fiber function receives a single void pointer argument which can
  *          point to any user-defined data structure. The fiber runs until this
@@ -99,7 +111,7 @@ typedef struct {
  * @warning Do not perform long-running operations without yielding, as this
  *          blocks all other fibers in a cooperative scheduling system.
  */
-typedef void (*fiber_fn)(void*);
+typedef void (*cfiber_fn)(void*);
 
 /**
  * @brief Initializes a fiber with a function and user data.
@@ -108,12 +120,14 @@ typedef void (*fiber_fn)(void*);
  * @param user_data Pointer passed to the fiber function when it starts.
  *
  * @details Sets up the fiber's initial execution state:
+ *            - Zeroes the context, then:
  *            - Configures the stack pointer to the top of the stack.
  *            - Sets up initial register values according to the architecture ABI.
- *            - Arranges for fiber_prologue to be called on first context switch.
+ *            - Arranges for cfiber_prologue to be called on first context switch.
  *            - Stores function pointer and user data in callee-saved registers.
+ *            - Copies the caller's floating-point control state.
  *
- *          After initialization, use switch_context() to start executing the fiber.
+ *          After initialization, use cfiber_switch_context() to start executing the fiber.
  *
  * @pre fiber->stack must be allocated and valid.
  * @pre fiber->stack_size must be set to the stack size in bytes.
@@ -125,7 +139,7 @@ typedef void (*fiber_fn)(void*);
  * @warning Calling this function on an already-running fiber causes undefined
  *          behavior. Only initialize fibers before first use.
  */
-CFIBER_EXPORT void init_fiber(fiber_t* fiber, fiber_fn func, void* user_data) __attribute__((nonnull(1, 2)));
+CFIBER_EXPORT void cfiber_init(cfiber_t* fiber, cfiber_fn func, void* user_data) __attribute__((nonnull(1, 2)));
 
 /**
  * @brief Signature of the fiber-return hook.
@@ -136,7 +150,7 @@ CFIBER_EXPORT void init_fiber(fiber_t* fiber, fiber_fn func, void* user_data) __
  *          fiber's entry function returns. The implementation must:
  *            1. Mark the current fiber as completed / available for reuse.
  *            2. Select the next fiber (or the caller context) to switch to.
- *            3. Call switch_context(). It must never return normally.
+ *            3. Call cfiber_switch_context(). It must never return normally.
  *
  * @warning Must not return; there is no valid return address on the stack.
  */
@@ -163,8 +177,8 @@ typedef struct {
  *          of schedulers share a process: each registers its own hook while it
  *          runs and restores the previous one when it returns.
  *
- *          A scheduler-free user driving fibers directly with init_fiber() and
- *          switch_context() registers a hook here instead of defining a symbol.
+ *          A scheduler-free user driving fibers directly with cfiber_init() and
+ *          cfiber_switch_context() registers a hook here instead of defining a symbol.
  *
  * @note The registration is thread-local on hosted targets and a plain global on
  *       bare-metal ARM Cortex-M (which has no TLS), mirroring the built-in

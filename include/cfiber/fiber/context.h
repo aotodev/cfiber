@@ -28,9 +28,6 @@ extern "C" {
  * ============================================================================ */
 #if defined(__x86_64__)
 
-typedef uint16_t word_t;
-#define DEFAULT_ALIGMENT 16
-
 /**
  * @brief x86_64 context structure.
  * @details Stores callee-saved registers according to the System V AMD64 ABI,
@@ -58,15 +55,12 @@ typedef struct {
     uint32_t mxcsr;
     /** x87 FPU control word. */
     uint16_t x87_cw;
-} __attribute__((packed, aligned(DEFAULT_ALIGMENT))) context_t;
+} __attribute__((aligned(16))) cfiber_context_t;
 
 /* ============================================================================
  * AArch64 (AAPCS64)
  * ============================================================================ */
 #elif defined(__aarch64__)
-
-typedef uint32_t word_t;
-#define DEFAULT_ALIGMENT 16
 
 /**
  * @brief AArch64 context structure.
@@ -115,15 +109,12 @@ typedef struct {
 
     /** Floating-point control register (rounding mode, trap enables). */
     uint64_t fpcr;
-} __attribute__((packed, aligned(DEFAULT_ALIGMENT))) context_t;
+} __attribute__((aligned(16))) cfiber_context_t;
 
 /* ============================================================================
  * ARM 32-bit (AAPCS for Cortex-M series)
  * ============================================================================ */
 #elif defined(__arm__)
-
-typedef uint32_t word_t;
-#define DEFAULT_ALIGMENT 8
 
 /**
  * @brief 32-bit ARM Cortex-M context structure.
@@ -135,7 +126,6 @@ typedef uint32_t word_t;
  *              -mfloat-abi=softfp or hard), s16-s31 and the FPSCR are saved
  *              as well, so a fiber's rounding mode stays with the fiber.
  *            - Registers s0-s15 are caller-saved and not preserved.
- *            - FPU context adds 68 bytes to context size.
  *
  *          The layout follows the compile flags, so the library and its
  *          consumers must agree on -mfloat-abi and -mfpu.
@@ -185,7 +175,7 @@ typedef struct {
     /** Floating-point status and control register. */
     uint32_t fpscr;
 #endif
-} __attribute__((packed, aligned(DEFAULT_ALIGMENT))) context_t;
+} __attribute__((aligned(8))) cfiber_context_t;
 
 #else
 #error "Unsupported architecture"
@@ -193,8 +183,8 @@ typedef struct {
 
 /**
  * @brief Switches execution context from one fiber to another.
- * @param old_ctx Pointer to context structure where current state is saved.
- * @param new_ctx Pointer to context structure to restore and switch to.
+ * @param old_ctx Receives the current state.
+ * @param new_ctx Restored and switched to; only read.
  *
  * @details Performs a low-level context switch by:
  *            1. Saving callee-saved registers to the 'old' context.
@@ -205,13 +195,14 @@ typedef struct {
  *          platform's calling convention. After this function returns,
  *          execution continues where the 'new' context last yielded.
  *
- * @note This is typically called by scheduler code, not directly by users.
- * @note Both context pointers must be valid and properly initialized.
+ * @note Typically called by scheduler code, not directly by users.
+ * @note new_ctx must hold a state saved by this function or set by cfiber_init().
  *
  * @warning This function modifies the CPU state directly. Ensure proper
  *          stack alignment and valid stack pointers to avoid UB.
  */
-CFIBER_EXPORT extern void switch_context(context_t* old_ctx, context_t* new_ctx);
+CFIBER_EXPORT void cfiber_switch_context(cfiber_context_t* old_ctx, const cfiber_context_t* new_ctx)
+    __attribute__((nonnull(1, 2)));
 
 #ifdef __cplusplus
 }

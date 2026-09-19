@@ -7,7 +7,8 @@
  * libc assert in the growable stack pool. test_defensive covers the release
  * behaviour of the same paths under NDEBUG; this suite covers the debug
  * behaviour, so each guard is exercised in both configurations. ASSERT_DEATH
- * runs the misuse in a child and passes only if the child dies. Hosted only.
+ * runs the misuse in a child and passes only if the child dies. States the
+ * library traps in every build are covered here in both. Hosted only.
  */
 
 #include "cfiber/memory/multislab_alloc.h"
@@ -27,7 +28,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-#define BLOCK CACHE_LINE_SIZE
+#define BLOCK CFIBER_CACHE_LINE_SIZE
 #define STACK_SIZE 16384
 
 /* ============================================================================
@@ -55,6 +56,50 @@ static int test_death_helper(void) {
     return 0;
 }
 
+/* ============================================================================
+ * unrecoverable states: trap in every build
+ * ============================================================================ */
+
+static cfiber_context_t g_main_ctx;
+static cfiber_t g_fiber;
+static uint8_t g_stack[STACK_SIZE];
+
+static void fiber_returns(void* arg) {
+    (void)arg;
+}
+
+static void return_without_hook(void* arg) {
+    (void)arg;
+    g_fiber.stack = g_stack;
+    g_fiber.stack_size = sizeof g_stack;
+    cfiber_init(&g_fiber, fiber_returns, nullptr);
+    (void)cfiber_set_return_hook(nullptr, nullptr);
+    cfiber_switch_context(&g_main_ctx, &g_fiber.ctx); /* returns into the epilogue */
+}
+
+static void switch_to_scheduler_by_hand(void* arg) {
+    (void)arg;
+    cfiber_scheduler_t* s = cfiber_scheduler_current();
+    /* Bypasses cfiber_yield: not re-enqueued, active_count stays 1. */
+    cfiber_switch_context(&s->current->fiber.ctx, &s->sched_ctx);
+}
+
+static void run_with_lost_fiber(void* arg) {
+    (void)arg;
+    cfiber_scheduler_t sched;
+    if (cfiber_scheduler_init(&sched, (cfiber_scheduler_config_t){.stack_size = STACK_SIZE}) != 0) {
+        _exit(0);
+    }
+    (void)cfiber_scheduler_spawn(&sched, switch_to_scheduler_by_hand, nullptr);
+    cfiber_scheduler_run(&sched); /* ready queue empty, one live fiber */
+}
+
+static int test_unrecoverable_states_trap(void) {
+    ASSERT_DEATH(return_without_hook, nullptr);
+    ASSERT_DEATH(run_with_lost_fiber, nullptr);
+    return 0;
+}
+
 #ifndef NDEBUG
 /* ============================================================================
  * allocators
@@ -64,47 +109,47 @@ static void slab_foreign_release(void* arg) {
     (void)arg;
     alignas(BLOCK) static uint8_t mem[BLOCK * 2];
     alignas(BLOCK) static uint8_t other[BLOCK];
-    slab_t s;
-    if (slab_init(&s, BLOCK, mem, sizeof mem) != 0) {
+    cfiber_slab_t s;
+    if (cfiber_slab_init(&s, BLOCK, mem, sizeof mem) != 0) {
         _exit(0);
     }
-    (void)slab_alloc(&s);
-    (void)slab_release(&s, other);
+    (void)cfiber_slab_alloc(&s);
+    (void)cfiber_slab_release(&s, other);
 }
 
 static void slab_double_free(void* arg) {
     (void)arg;
     alignas(BLOCK) static uint8_t mem[BLOCK * 2];
-    slab_t s;
-    if (slab_init(&s, BLOCK, mem, sizeof mem) != 0) {
+    cfiber_slab_t s;
+    if (cfiber_slab_init(&s, BLOCK, mem, sizeof mem) != 0) {
         _exit(0);
     }
-    void* a = slab_alloc(&s);
-    (void)slab_release(&s, a);
-    (void)slab_release(&s, a);
+    void* a = cfiber_slab_alloc(&s);
+    (void)cfiber_slab_release(&s, a);
+    (void)cfiber_slab_release(&s, a);
 }
 
 static void multislab_foreign_release(void* arg) {
     (void)arg;
-    multislab_t ms;
-    if (multislab_init(&ms, BLOCK, 4, 0, 1) != 0) {
+    cfiber_multislab_t ms;
+    if (cfiber_multislab_init(&ms, BLOCK, 4, 0, 1) != 0) {
         _exit(0);
     }
-    (void)multislab_alloc(&ms);
+    (void)cfiber_multislab_alloc(&ms);
     int stranger = 0;
-    multislab_release(&ms, &stranger);
+    cfiber_multislab_release(&ms, &stranger);
 }
 
 static void growable_release_to_wrong_pool(void* arg) {
     (void)arg;
     const long ps = sysconf(_SC_PAGESIZE);
-    growable_stack_allocator_t* pool = growable_stack_allocator_create(
-        (growable_stack_allocator_args_t){.max_stack_size = (size_t)ps * 4, .cache_capacity = 2});
-    cstack_t foreign = cstack_growable_create((size_t)ps * 8);
-    if (!pool || !is_valid_cstack(&foreign)) {
+    cfiber_growable_stack_allocator_t* pool = cfiber_growable_stack_allocator_create(
+        (cfiber_growable_stack_allocator_args_t){.max_stack_size = (size_t)ps * 4, .cache_capacity = 2});
+    cfiber_stack_t foreign = cfiber_growable_stack_create((size_t)ps * 8);
+    if (!pool || !cfiber_stack_is_valid(&foreign)) {
         _exit(0);
     }
-    growable_stack_release(pool, &foreign); /* libc assert */
+    cfiber_growable_stack_release(pool, &foreign); /* libc assert */
 }
 
 static int test_allocator_guards_trap(void) {
@@ -211,6 +256,7 @@ int main(void) {
     cfiber_test_suite_begin("death tests (traps, aborts, sanitizer reports)");
 
     RUN_TEST(test_death_helper);
+    RUN_TEST(test_unrecoverable_states_trap);
 #ifndef NDEBUG
     RUN_TEST(test_allocator_guards_trap);
     RUN_TEST(test_scheduler_guards_trap);

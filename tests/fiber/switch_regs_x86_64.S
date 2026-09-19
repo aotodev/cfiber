@@ -1,7 +1,7 @@
 .intel_syntax noprefix
 .text
 
-# void cfiber_test_switch_regs(context_t* self, context_t* other,
+# void cfiber_test_switch_regs(cfiber_context_t* self, cfiber_context_t* other,
 #                              const uintptr_t magic[6], uintptr_t out[6])
 # Slot order: rbx, rbp, r12, r13, r14, r15.
 # Loads magic into the callee-saved set, switches, stores the set on return.
@@ -26,7 +26,7 @@ cfiber_test_switch_regs:
     mov     r14, [rdx + 0x20]
     mov     r15, [rdx + 0x28]
 
-    call    switch_context
+    call    cfiber_switch_context
 
     pop     rcx
     mov     [rcx + 0x00], rbx

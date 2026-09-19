@@ -25,7 +25,7 @@ cooperative scheduler and the allocators to back them. Two targets, one API:
 
 | Component | Description |
 |-----------|-------------|
-| `fiber` | A stack plus the callee-saved register set. `init_fiber` and `switch_context`, no syscall on the switch path. |
+| `fiber` | A stack plus the callee-saved register set. `cfiber_init` and `cfiber_switch_context`, no syscall on the switch path. |
 | `scheduler` | Cooperative FCFS scheduler with dynamic spawn and no compile-time fiber cap. |
 | `reactor` | Optional, Linux only. Single-threaded `epoll(7)` loop; a parked fiber resumes on readiness, deadline or cancellation. |
 | `slab`, `multislab` | Fixed-size block allocator with bitmap tracking, and an auto-expanding chain of slabs with a hysteresis shrink policy. |
@@ -134,6 +134,7 @@ guarantee. Details in [docs/testing.md](docs/testing.md).
 - [Testing](docs/testing.md): what the suites and fuzzers cover.
 - [Building](docs/building.md): CMake options, cross builds, consuming cfiber from another project.
 - [Layout](docs/layout.md): source tree, header conventions, per-architecture assembly.
+- [Style](docs/style.md): naming, header and error contracts, comments, tests, commits.
 
 ## License
 
