@@ -1437,15 +1437,28 @@ static int test_epoll_wait_eintr(void) {
     return 0;
 }
 
-/* More timers than the heap's initial capacity, waking in deadline order. */
+/* More timers than the heap's initial capacity (16), waking in deadline order.
+ * Each fiber records the deadline it asked for; the check compares wake order
+ * against those, not against wall-clock arithmetic on spawn order, so scheduling
+ * gaps between fiber start-ups cannot invert the expected order. */
 #define MANY_TIMERS 40
+#define MANY_STEP_MS 5
 
+static int64_t mono_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ((int64_t)ts.tv_sec * 1000000000) + ts.tv_nsec;
+}
+
+static int64_t g_many_deadline[MANY_TIMERS];
 static int g_many_order[MANY_TIMERS];
 static int g_many_len;
 
 static void many_timer_fiber(void* arg) {
     int id = (int)(intptr_t)arg;
-    (void)cfiber_ev_sleep((uint64_t)ms_to_ns(1 + (id * 2)));
+    const int64_t ns = ms_to_ns(1 + (id * MANY_STEP_MS));
+    g_many_deadline[id] = mono_ns() + ns;
+    (void)cfiber_ev_sleep((uint64_t)ns);
     if (g_many_len < MANY_TIMERS) {
         g_many_order[g_many_len++] = id;
     }
@@ -1457,18 +1470,19 @@ static int test_timer_heap_growth(void) {
     cfiber_reactor_t* r = make_reactor();
     ASSERT_NOT_NULL(r);
     /* spawn in reverse so the heap has to sort, not just append */
+    bool spawned = true;
     for (int id = MANY_TIMERS - 1; id >= 0; id--) {
-        ASSERT_TRUE(cfiber_reactor_spawn(r, many_timer_fiber, (void*)(intptr_t)id, nullptr));
+        spawned = spawned && cfiber_reactor_spawn(r, many_timer_fiber, (void*)(intptr_t)id, nullptr);
     }
+    const int rc = cfiber_reactor_run(r);
+    cfiber_reactor_destroy(r); /* before the asserts: a failing test must not also leak */
 
-    cfiber_reactor_run(r);
-
+    ASSERT_TRUE(spawned);
+    ASSERT_EQ_U32(rc, 0);
     ASSERT_EQ_U32(g_many_len, MANY_TIMERS);
-    for (int i = 0; i < MANY_TIMERS; i++) {
-        ASSERT_EQ_U32(g_many_order[i], i);
+    for (int i = 1; i < MANY_TIMERS; i++) {
+        ASSERT_TRUE(g_many_deadline[g_many_order[i - 1]] <= g_many_deadline[g_many_order[i]]);
     }
-
-    cfiber_reactor_destroy(r);
     return 0;
 }
 
