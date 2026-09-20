@@ -1,0 +1,11 @@
+version = 1
+SPDX-PackageName = "cfiber"
+SPDX-PackageSupplier = "Aoto"
+SPDX-PackageDownloadLocation = "https://github.com/aotodev/cfiber"
+
+# Files that carry no header: documentation and tool configuration.
+[[annotations]]
+path = ["README.md", "CHANGELOG.md", "docs/**", "fuzz/README.md", "LICENSE", ".gitignore",
+        ".clang-format", ".clang-tidy", ".yamllint", ".pre-commit-config.yaml", ".cmake-format.yaml"]
+SPDX-FileCopyrightText = "2026 Aoto"
+SPDX-License-Identifier = "MIT"

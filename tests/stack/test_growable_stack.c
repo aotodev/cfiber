@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_growable_stack.c
  * @brief Unit tests for MMU-backed growable stacks and their pooled allocator.

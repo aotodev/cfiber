@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  fuzz_reactor.c
  * @brief Coverage-guided fuzzer for the epoll(7) reactor.

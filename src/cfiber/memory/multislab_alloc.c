@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 #include "cfiber/memory/multislab_alloc.h"
 
 #include "cfiber/core/internal.h"

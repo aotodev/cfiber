@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  stack_sanitize.h
  * @brief Debug-only stack instrumentation for stacks without MMU protection.

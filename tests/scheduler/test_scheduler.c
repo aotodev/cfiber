@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_scheduler.c
  * @brief Unit tests for the cooperative FCFS scheduler.

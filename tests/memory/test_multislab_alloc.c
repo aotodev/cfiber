@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_multislab_alloc.c
  * @brief Unit tests for the slab and multislab allocators.

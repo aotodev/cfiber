@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 #include "cfiber/stack/debug/stack_sanitize.h"
 
 #if CFIBER_STACK_SANITIZER

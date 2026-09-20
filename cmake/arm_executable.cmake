@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # ---------------------------------------------------------------------------------------
 # add_arm_executable(name source...)
 #

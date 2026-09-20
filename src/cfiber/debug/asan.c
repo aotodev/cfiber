@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 #include "cfiber/debug/asan.h"
 
 /* The whole TU is empty unless the library is built with AddressSanitizer.

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Pre-commit linters: clang-format, shellcheck, cmake-lint, yamllint, whitespace.
 name: lint
 

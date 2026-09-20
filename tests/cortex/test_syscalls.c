@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_syscalls.c
  * @brief Cortex-M support code (utils/cortex): RAM layout and _sbrk bounds.

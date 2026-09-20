@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  multislab_alloc.h
  * @brief Auto-expanding multi-slab allocator for fixed-size blocks.

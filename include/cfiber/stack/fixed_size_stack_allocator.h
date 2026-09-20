@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  fixed_size_stack_allocator.h
  * @brief Thin wrapper that pairs a multislab allocator with cfiber_stack_t descriptors.

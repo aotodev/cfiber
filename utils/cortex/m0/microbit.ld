@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /* BBC micro:bit v1, nRF51822 (Cortex-M0): 256K flash, 16K RAM. */
 
 MEMORY

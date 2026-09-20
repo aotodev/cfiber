@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # WebSocket (RFC 6455) echo server on the epoll reactor: a standalone example.
 #
 # Example code is illustrative, not library-grade: it is built with -Wall -Wextra

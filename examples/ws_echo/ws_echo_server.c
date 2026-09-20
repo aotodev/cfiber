@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /* Standalone WebSocket echo daemon on the cfiber reactor. Usage: ws_echo [port] */
 #include "ws_echo.h"
 

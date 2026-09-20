@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /* Arm MPS2+ AN385 (Cortex-M3): code in ITCM, data, heap and stack in DTCM. */
 
 MEMORY

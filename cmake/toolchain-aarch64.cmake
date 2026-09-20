@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # ---------------------------------------------------------------------------------------
 # Toolchain for cross-compiling cfiber to aarch64 (tested via qemu-aarch64).
 # ---------------------------------------------------------------------------------------

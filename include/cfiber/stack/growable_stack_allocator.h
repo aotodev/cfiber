@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  growable_stack_allocator.h
  * @brief Pooled allocator for MMU-protected growable stacks.

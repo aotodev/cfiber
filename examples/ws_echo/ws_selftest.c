@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /*
  * In-process self-test for the WebSocket echo example: server and clients run as
  * fibers on one reactor over real loopback sockets. Verifies the handshake

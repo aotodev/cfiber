@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # ---------------------------------------------------------------------------------------
 # Toolchain for cross-compiling cfiber to ARM Cortex-M (tested via qemu-system-arm).
 # ---------------------------------------------------------------------------------------
