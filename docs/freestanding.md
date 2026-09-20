@@ -11,9 +11,10 @@ public macro, the growable-stack sources are dropped, and the shared-library
 option is unavailable (there is no dynamic loader). Nothing needs to be turned
 on by hand. Build invocations are in [building.md](building.md).
 
-The hosted portion of the library uses POSIX (`mmap`, `mprotect`); the
-freestanding portion uses only `<stdint.h>` and `<stddef.h>`. There is no libc
-dependency to satisfy beyond that.
+The hosted portion of the library uses POSIX (`mmap`, `mprotect`). The
+freestanding portion needs `<stdint.h>`, `<stddef.h>` and `<string.h>`
+(`memset`, `memcpy`), plus `aligned_alloc` / `free` for the default backing
+allocator only; with `cfiber_scheduler_init_ext()` the heap is never touched.
 
 ## Running without malloc
 

@@ -4,6 +4,7 @@
 #include "cfiber/version.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int g_ran;
 
@@ -25,6 +26,10 @@ int main(void) {
     cfiber_scheduler_run(&sched);
     cfiber_scheduler_destroy(&sched);
 
-    printf("cfiber %s: fiber ran (%d)\n", CFIBER_VERSION_STRING, g_ran);
+    /* The linked library must be the one the headers describe. */
+    if (cfiber_version() != CFIBER_VERSION || strcmp(cfiber_version_string(), CFIBER_VERSION_STRING) != 0) {
+        return 1;
+    }
+    printf("cfiber %s: fiber ran (%d)\n", cfiber_version_string(), g_ran);
     return g_ran == 2 ? 0 : 1;
 }

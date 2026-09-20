@@ -119,9 +119,9 @@ resuming a stackless coroutine pulls in a single cache line. If raw
 per-coroutine throughput on a tight inner loop is the priority, or if the
 working set is enormous, stackless is usually the right tool.
 
-cfiber narrows the gap where it can. On hosted targets, stacks grow one page
-at a time on demand (backed by a guard-page SIGSEGV handler) so an idle fiber
-costs only the pages it has actually touched. On freestanding targets, the
+cfiber narrows the gap where it can. On hosted targets, stacks are demand
+paged behind a `PROT_NONE` guard page, so an idle fiber costs only the pages it
+has actually touched. On freestanding targets, the
 user sizes a slab of fixed stacks for the worst-case workload and pays no
 heap or page-fault cost at runtime. Neither closes the gap entirely; both make
 fibers practical for the cases where their flexibility is worth it.

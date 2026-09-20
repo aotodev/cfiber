@@ -11,7 +11,7 @@ include/cfiber/
   stack/       stack descriptor + fixed-size and growable allocators
     debug/     canary + watermark sanitizer
 src/cfiber/    matching implementation files; per-arch assembly under fiber/
-  core/        internal.h: private macros and the hidden prologue/epilogue
+  core/        internal.h: private macros and the hidden prologue/epilogue; version.c
 examples/
   scheduler/   built-in scheduler example (all targets, incl. bare-metal ARM)
   ws_echo/     WebSocket echo on the reactor (Linux, needs CFIBER_REACTOR)

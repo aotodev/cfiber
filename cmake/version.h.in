@@ -6,6 +6,8 @@
 #ifndef CFIBER_VERSION_H
 #define CFIBER_VERSION_H
 
+#include "cfiber/core/macros.h"
+
 #define CFIBER_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
 #define CFIBER_VERSION_MINOR @PROJECT_VERSION_MINOR@
 #define CFIBER_VERSION_PATCH @PROJECT_VERSION_PATCH@
@@ -13,5 +15,19 @@
 
 /** @brief Single integer for comparisons: major * 10000 + minor * 100 + patch. */
 #define CFIBER_VERSION ((CFIBER_VERSION_MAJOR * 10000) + (CFIBER_VERSION_MINOR * 100) + CFIBER_VERSION_PATCH)
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/** @brief CFIBER_VERSION of the library actually linked, for shared-library consumers. */
+CFIBER_EXPORT int cfiber_version(void);
+
+/** @brief CFIBER_VERSION_STRING of the library actually linked. */
+CFIBER_EXPORT const char* cfiber_version_string(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CFIBER_VERSION_H */

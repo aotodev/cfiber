@@ -127,6 +127,7 @@ target_sources(cfiber PRIVATE
     ${_cfiber_src_dir}/memory/multislab_alloc.c
     ${_cfiber_src_dir}/scheduler/scheduler.c
     ${_cfiber_src_dir}/debug/asan.c
+    ${_cfiber_src_dir}/core/version.c
 )
 
 configure_file(cmake/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/cfiber/version.h @ONLY)
