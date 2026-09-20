@@ -105,7 +105,7 @@ accumulates the peak in `cfiber_scheduler_stack_peak()`.
 ./utils/make.sh --arch=arm --cpu=cortex-m4 -t --sanitizer
 ```
 
-CI runs the sanitizer suites natively and on Cortex-M0 and M3 under QEMU.
+CI runs the sanitizer suites natively, on AArch64 and on Cortex-M0 and M3 under QEMU.
 
 ## UndefinedBehaviorSanitizer
 

@@ -22,6 +22,7 @@
  */
 
 #include "cfiber/fiber/fiber.h"
+#include "cfiber/version.h"
 #include "test/test.h"
 
 #include <fenv.h>
@@ -397,6 +398,13 @@ static int test_init_zeroes_context(void) {
     return 0;
 }
 
+/* The only suite that runs on every target, so the version round trip lives here. */
+static int test_version_matches_header(void) {
+    ASSERT_EQ_U32((uint32_t)cfiber_version(), (uint32_t)CFIBER_VERSION);
+    ASSERT_TRUE(strcmp(cfiber_version_string(), CFIBER_VERSION_STRING) == 0);
+    return 0;
+}
+
 static bool within_stack(const cfiber_t* fiber, uintptr_t sp) {
     const uintptr_t base = (uintptr_t)fiber->stack;
     return sp >= base && sp <= base + fiber->stack_size;
@@ -462,6 +470,7 @@ int main(void) {
 #endif
     RUN_TEST(test_return_hook_invoked);
     RUN_TEST(test_init_zeroes_context);
+    RUN_TEST(test_version_matches_header);
 
     teardown_fiber(&fx.test_fiber);
     teardown_fiber(&fx.intermediary);

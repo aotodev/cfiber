@@ -3,8 +3,9 @@
 ## Requirements
 
 - CMake 3.28 or newer
-- A GNU-compatible C23 compiler. Tested with GCC 15 and Clang 22; older
-  versions back to GCC 14 / Clang 19 should work but are unverified.
+- A GNU-compatible C23 compiler. CI uses GCC 16 and Clang 22 (the pinned
+  toolchain image). GCC 13 and Clang 19 are the oldest with the C23 features
+  used (`constexpr`, `nullptr`, `#elifdef`) and are unverified.
 - For ARM cross-builds: `arm-none-eabi-gcc` and `qemu-system-arm`
 - For AArch64 cross-builds: `aarch64-linux-gnu-gcc` and `qemu-user`
 
@@ -79,10 +80,33 @@ library and everything linked against it must be built with the same
 The default is a static archive. Shared builds export only the documented API
 (everything declared with `CFIBER_EXPORT` in the public headers) and hide
 everything else via `-fvisibility=hidden`. Shared builds carry the major
-version as `SOVERSION`: once 1.0 is tagged, the ABI is stable within a major,
-and the layout-affecting options (`CFIBER_BITMAP_SIZE`, `CFIBER_ASAN_REDZONE`,
-`CFIBER_STACK_SANITIZER`, the ARM float ABI) must match between library and
-consumer. Before 1.0 any release may change it.
+version as `SOVERSION`.
+
+## API and ABI
+
+The public API is every header under `include/cfiber/` plus the generated
+`cfiber/version.h`; `src/` is private. Until 1.0 a minor release may change the
+API, and every change is listed in the [changelog](../CHANGELOG.md). From 1.0
+on, the ABI is stable within a major version and a break bumps the major and
+the `SOVERSION`.
+
+Every struct is visible so it can be embedded or placed in static storage, so
+any field change is an ABI break, and these build options change struct layout
+or the saved register set. Library and consumer must agree on them; the
+installed CMake package and `cfiber.pc` carry the values of the build they came
+from:
+
+| Option | Affects |
+| ------ | ------- |
+| `CFIBER_BITMAP_SIZE` | `cfiber_slab_t`, and everything embedding it (multislab, scheduler) |
+| `CFIBER_ASAN` / `CFIBER_ASAN_REDZONE` | Stack block size and the `usable_base` of every fixed-size stack |
+| `CFIBER_STACK_SANITIZER` | The canary word and watermark below every fixed-size stack |
+| `CFIBER_ARM_FLOAT_ABI`, `CFIBER_ARM_FPU_NAME` | `cfiber_context_t` on Cortex-M (`s16`-`s31`, `FPSCR`) |
+| `CFIBER_FREESTANDING` | Selected by the ARM target; drops the growable-stack API |
+
+The runtime counterpart of the version header is `cfiber_version()` and
+`cfiber_version_string()`, so a program linked against `libcfiber.so` can check
+the library it actually loaded.
 
 The shared build is not available on the freestanding target, since bare-metal
 Cortex-M has no dynamic loader.
@@ -99,8 +123,8 @@ cmake --install build
 ```
 
 installs the library, the headers (including the generated `cfiber/version.h`
-with `CFIBER_VERSION_MAJOR/MINOR/PATCH` and `CFIBER_VERSION_STRING`), a CMake
-package and `cfiber.pc`. A consumer then needs only:
+with `CFIBER_VERSION_MAJOR/MINOR/PATCH`, `CFIBER_VERSION_STRING` and the
+`cfiber_version()` functions), a CMake package and `cfiber.pc`. A consumer then needs only:
 
 ```cmake
 find_package(cfiber CONFIG REQUIRED)

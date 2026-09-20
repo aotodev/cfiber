@@ -81,7 +81,9 @@ front. `cfiber_growable_stack_create(max_size)` maps `max_size` plus one page wi
 Growth is therefore demand paging, not a fault handler: the mapping is readable
 and writable across its whole extent, and the kernel commits a physical page the
 first time the fiber's stack pointer reaches it. `MAP_NORESERVE` keeps the
-untouched remainder from counting against commit accounting. An idle fiber costs
+untouched remainder from counting against commit accounting under the default
+overcommit heuristic; with `vm.overcommit_memory=2` the whole extent is charged
+at `mmap` time. An idle fiber costs
 the pages it has actually touched, not the pages it might touch, which is what
 makes tens of thousands of reactor fibers with a 64 KB ceiling practical.
 

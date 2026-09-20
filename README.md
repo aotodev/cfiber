@@ -90,7 +90,8 @@ The watermark reports peak usage, so stack sizing is a measurement. See
 
 ## Building
 
-Needs CMake 3.28+ and a GNU-compatible C23 compiler. CI builds with GCC 15.
+Needs CMake 3.28+ and a GNU-compatible C23 compiler. CI builds with GCC 16 and
+Clang 22.
 
 ```bash
 cmake -B build -DCFIBER_BUILD_EXAMPLES=ON -DCFIBER_BUILD_TESTS=ON
@@ -122,6 +123,15 @@ Per-architecture tests check the callee-saved set across a context switch.
 
 This is a young library. Treat the above as what is exercised today, not as a
 guarantee. Details in [docs/testing.md](docs/testing.md).
+
+## Stability
+
+0.1.0 is the first tagged release. Until 1.0 a minor release may change the
+API; every change is listed in [CHANGELOG.md](CHANGELOG.md). The public API is
+everything under `include/cfiber/`. All structs are visible, so any field change
+is an ABI break, and a handful of build options change struct layout; library
+and consumer must agree on them. The list and the versioning rules are in
+[docs/building.md](docs/building.md#api-and-abi).
 
 ## Docs
 

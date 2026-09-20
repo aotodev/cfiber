@@ -1,6 +1,6 @@
 /**
  * @file slab_alloc.h
- * @brief Simple slab allocator for fixed-size stacks with user-provided memory.
+ * @brief Fixed-size block allocator over user-provided memory.
  * @details Intended for freestanding/embedded environments where the user
  *          provides a contiguous block of memory to be carved into stacks.
  */
