@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_death.c
  * @brief Misuse that must trap or abort, observed through a forked child.

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 #include "ws_echo.h"
 
 #include <arpa/inet.h>

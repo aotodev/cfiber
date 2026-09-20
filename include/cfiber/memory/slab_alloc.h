@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file slab_alloc.h
  * @brief Fixed-size block allocator over user-provided memory.

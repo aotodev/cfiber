@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  fuzz_input.h
  * @brief Tiny byte-stream reader and invariant macro shared by the fuzzers.

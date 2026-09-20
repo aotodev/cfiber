@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  reactor.h
  * @brief Convenience header: pulls in the epoll reactor API.

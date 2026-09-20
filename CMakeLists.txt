@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(cfiber VERSION 0.1.0 LANGUAGES C ASM)
 

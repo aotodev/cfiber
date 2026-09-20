@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 .text
 
 // void cfiber_test_switch_regs(cfiber_context_t* self, cfiber_context_t* other,

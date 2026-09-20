@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /* QEMU MPS2-AN500 (Cortex-M7): 4M flash at 0, 4M SRAM at 0x20000000. */
 
 MEMORY

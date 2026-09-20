@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 #ifndef CFIBER_EXAMPLE_CONFIG_H
 #define CFIBER_EXAMPLE_CONFIG_H
 

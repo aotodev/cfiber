@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  scheduler.h
  * @brief Cooperative FCFS fiber scheduler backed by multislab allocation.

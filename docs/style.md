@@ -44,7 +44,10 @@ When two rules conflict, the earlier priority wins.
 
 ## Headers
 
-Order inside a header: doxygen `@file` / `@brief` block, include guard,
+Every file opens with the two SPDX lines (copyright text, then the `MIT`
+license identifier) in the file's comment syntax; copy them from any neighbour.
+Markdown and the dotfiles are covered by `REUSE.toml` instead, and `reuse lint`
+runs in pre-commit. Then, in a header: doxygen `@file` / `@brief` block, include guard,
 includes, `extern "C"`, declarations. Includes come in three groups separated by
 a blank line: the file's own header (in `.c` files), project headers, system
 headers; `clang-format` sorts within each group.

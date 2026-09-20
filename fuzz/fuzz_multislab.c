@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  fuzz_multislab.c
  * @brief Coverage-guided fuzzer for the slab / multislab allocator.

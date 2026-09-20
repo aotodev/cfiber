@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # ======================================================================================
 # libFuzzer targets (enabled with -DCFIBER_FUZZ=ON; Clang only).
 #

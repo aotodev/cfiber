@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_fixed_size_stack_allocator.c
  * @brief Unit tests for the multislab-backed fixed-size stack allocator.

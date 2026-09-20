@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  reactor.h
  * @brief Optional, Linux-only epoll(7) reactor for cfiber fibers.

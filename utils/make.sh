@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Build script for cfiber. Run from anywhere; auto-detects project root.
 #
 # Usage: ./utils/make.sh [options]

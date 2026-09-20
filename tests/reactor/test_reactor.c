@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_reactor.c
  * @brief Functional tests for the optional epoll(7) reactor.

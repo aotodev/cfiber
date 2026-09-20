@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  tsan.h
  * @brief ThreadSanitizer fiber annotations for hand-rolled context switches.

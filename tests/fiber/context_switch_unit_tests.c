@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  context_switch_unit_tests.c
  * @brief Register preservation and entry-state tests for cfiber_switch_context().

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 .global cfiber_prologue
 .hidden cfiber_prologue
 .type cfiber_prologue, %function

@@ -31,6 +31,8 @@ utils/
   make.sh      build + run convenience script
   cortex/      startup code and linker scripts for QEMU Cortex-M targets
 cmake/         toolchain files, helpers, package-config and version templates
+LICENSES/      license texts for REUSE; LICENSE at the root is the same MIT text
+REUSE.toml     license metadata for files that carry no SPDX header
 ci/            Containerfile for the CI toolchain image
 .github/
   workflows/   per-target CI workflows

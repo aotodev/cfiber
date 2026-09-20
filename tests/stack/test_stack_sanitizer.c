@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_stack_sanitizer.c
  * @brief Unit tests for the canary + watermark stack instrumentation.

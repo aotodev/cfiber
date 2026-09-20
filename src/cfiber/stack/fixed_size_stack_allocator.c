@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 #include "cfiber/stack/fixed_size_stack_allocator.h"
 
 #include "cfiber/core/internal.h"

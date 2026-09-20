@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Builds and pushes the cfiber CI toolchain image to ghcr.io; the test workflows only
 # pull it, pinned by digest. On demand only, so toolchain bumps stay deliberate.
 name: ci-image

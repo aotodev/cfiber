@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  macros.h
  * @brief Public build constants: export attribute, defensive toggle, cache line

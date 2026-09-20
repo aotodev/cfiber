@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  asan.h
  * @brief AddressSanitizer integration for fiber stacks and context switches.

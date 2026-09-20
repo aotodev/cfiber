@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Time-boxed libFuzzer smoke run for the allocator, scheduler and reactor harnesses.
 # The corpus is cached across runs so coverage accumulates.
 name: fuzz

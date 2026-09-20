@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /* Links against an installed cfiber through find_package: the public headers
  * resolve, the version header is installed, and a scheduler round trip works. */
 #include "cfiber/scheduler.h"

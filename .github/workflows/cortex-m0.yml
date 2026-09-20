@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Bare-metal ARM Cortex-M0 build + tests, run under qemu-system-arm. The stack
 # sanitizer job covers the ARMv6-M alignment rules for the canary store.
 name: cortex-m0

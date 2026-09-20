@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Consumer smoke test: an out-of-tree project that finds an installed cfiber
 # through find_package and pkg-config exports. Built by CI against a staged
 # install; not part of the main build.

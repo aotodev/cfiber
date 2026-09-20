@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Scheduler example: the built-in FCFS scheduler on every supported target,
 # hosted and bare-metal ARM. Like a downstream consumer, it builds at the
 # -Wall -Wextra bar and links only the public cfiber library.

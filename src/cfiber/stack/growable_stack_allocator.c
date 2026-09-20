@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 #include "cfiber/stack/growable_stack_allocator.h"
 
 #include "cfiber/core/internal.h"

@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 .global cfiber_switch_context
 .type cfiber_switch_context, %function
 

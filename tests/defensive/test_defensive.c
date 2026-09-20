@@ -1,3 +1,6 @@
+/* SPDX-FileCopyrightText: 2026 Aoto
+ * SPDX-License-Identifier: MIT */
+
 /**
  * @file  test_defensive.c
  * @brief Tests for the library's defensive error paths, built with NDEBUG.

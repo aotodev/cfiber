@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Standalone examples. Each is illustrative, not library-grade: built at the
 # -Wall -Wextra bar of a typical downstream consumer rather than the library's
 # strict -Werror -Wconversion bar, and linking only the public libraries.

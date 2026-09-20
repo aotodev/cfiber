@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
 # Bare-metal ARM Cortex-M4 build + tests, soft-float and softfp (M4F), run under
 # qemu-system-arm.
 name: cortex-m4
