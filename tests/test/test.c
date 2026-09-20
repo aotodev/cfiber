@@ -38,6 +38,9 @@ void cfiber_check_fail(const char* file, int line, const char* fmt, ...) {
     va_end(ap);
 
     printf("\n");
+    /* A sanitizer that aborts at exit (LSan) skips the stdio flush; keep the
+     * failure text ahead of its report. */
+    fflush(stdout);
 }
 
 void cfiber_run_test(const char* name, int (*fn)(void)) {
@@ -49,6 +52,7 @@ void cfiber_run_test(const char* name, int (*fn)(void)) {
     if (rc != 0 || cfiber_checks_failed != failed_before) {
         cfiber_tests_failed++;
         printf("  " RED "[ FAIL ]" NC " %s\n", name);
+        fflush(stdout);
     } else {
         printf("  " GREEN "[  OK  ]" NC " %s\n", name);
     }
