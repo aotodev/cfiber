@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Aoto
+# SPDX-License-Identifier: MIT
+
+# Native macOS arm64 build + tests: Release and Debug, ASan, shared. Apple
+# clang on the runner; no container. The reactor, fuzzing and TSan stay
+# Linux-only.
+name: macos
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'utils/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.github/workflows/macos.yml'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            args: "-t -e"
+          - name: debug
+            args: "-t -e -d"
+          - name: asan
+            args: "-t -e --asan"
+          - name: shared
+            args: "-t -e --shared"
+    name: "macos arm64 (${{ matrix.name }})"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run tests
+        run: ./utils/make.sh ${{ matrix.args }}
