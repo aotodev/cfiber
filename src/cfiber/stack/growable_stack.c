@@ -11,6 +11,12 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+/* Darwin has no MAP_STACK; dropping it is harmless (MAP_NORESERVE exists
+ * there and is ignored). */
+#ifndef MAP_STACK
+#define MAP_STACK 0
+#endif
+
 /* 0 if the page size cannot be queried; callers fail with errno set. */
 static size_t page_size(void) {
     const long ps = sysconf(_SC_PAGESIZE);
@@ -80,5 +86,10 @@ void cfiber_growable_stack_recycle(cfiber_stack_t* const stack) {
     }
 
     const size_t length = cfiber_stack_usable_size(stack) - page;
+#ifdef __APPLE__
+    /* MADV_DONTNEED keeps pages resident on Darwin. */
+    (void)madvise(stack->usable_base, length, MADV_FREE_REUSABLE);
+#else
     (void)madvise(stack->usable_base, length, MADV_DONTNEED);
+#endif
 }

@@ -9,7 +9,9 @@ include(arm_executable)
 add_library(cfiber_test STATIC test/test.c)
 target_include_directories(cfiber_test PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # cfiber: the framework follows the library's hosted/freestanding split
-# (CFIBER_FREESTANDING) for its fork-based death helper.
+# (CFIBER_FREESTANDING) for its fork-based death helper. Test targets get
+# cfiber through this PUBLIC link; naming it again makes Apple's ld warn
+# about a duplicate library.
 target_link_libraries(cfiber_test PUBLIC cfiber project_flags)
 
 # add_test() can only run the binary on the build host, so register CTest cases
@@ -41,7 +43,7 @@ endif()
 target_include_directories(${_cfiber_test_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(${_cfiber_test_name} PRIVATE cfiber cfiber_test project_flags m) # m: fenv
+target_link_libraries(${_cfiber_test_name} PRIVATE cfiber_test project_flags m) # m: fenv
 
 if(_cfiber_register_ctest)
     add_test(NAME context_switch COMMAND ${_cfiber_test_name})
@@ -53,7 +55,7 @@ endif()
 if(_cfiber_arch STREQUAL "arm")
     add_arm_executable(test_cortex_syscalls cortex/test_syscalls.c)
     target_include_directories(test_cortex_syscalls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(test_cortex_syscalls PRIVATE cfiber cfiber_test project_flags)
+    target_link_libraries(test_cortex_syscalls PRIVATE cfiber_test project_flags)
 endif()
 
 # ======================================================================================
@@ -62,7 +64,7 @@ endif()
 if(NOT CFIBER_FREESTANDING)
     add_executable(test_memory_allocators memory/test_multislab_alloc.c)
     target_include_directories(test_memory_allocators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(test_memory_allocators PRIVATE cfiber cfiber_test project_flags)
+    target_link_libraries(test_memory_allocators PRIVATE cfiber_test project_flags)
 
     if(_cfiber_register_ctest)
         add_test(NAME memory_allocators COMMAND test_memory_allocators)
@@ -75,7 +77,7 @@ endif()
 if(NOT CFIBER_FREESTANDING)
     add_executable(test_scheduler scheduler/test_scheduler.c)
     target_include_directories(test_scheduler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(test_scheduler PRIVATE cfiber cfiber_test project_flags)
+    target_link_libraries(test_scheduler PRIVATE cfiber_test project_flags)
 
     if(_cfiber_register_ctest)
         add_test(NAME scheduler COMMAND test_scheduler)
@@ -88,13 +90,13 @@ endif()
 if(NOT CFIBER_FREESTANDING)
     add_executable(test_fixed_size_stack_allocator stack/test_fixed_size_stack_allocator.c)
     target_include_directories(test_fixed_size_stack_allocator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(test_fixed_size_stack_allocator PRIVATE cfiber cfiber_test project_flags)
+    target_link_libraries(test_fixed_size_stack_allocator PRIVATE cfiber_test project_flags)
 
     add_executable(test_growable_stack stack/test_growable_stack.c)
     target_include_directories(test_growable_stack PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     # sigaction, sigsetjmp: hidden under strict -std=c23
     target_compile_definitions(test_growable_stack PRIVATE _POSIX_C_SOURCE=200809L)
-    target_link_libraries(test_growable_stack PRIVATE cfiber cfiber_test project_flags)
+    target_link_libraries(test_growable_stack PRIVATE cfiber_test project_flags)
 
     if(_cfiber_register_ctest)
         add_test(NAME fixed_size_stack_allocator COMMAND test_fixed_size_stack_allocator)
@@ -144,7 +146,7 @@ if(NOT CFIBER_FREESTANDING)
     add_executable(test_death death/test_death.c)
     target_include_directories(test_death PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(test_death PRIVATE _GNU_SOURCE)
-    target_link_libraries(test_death PRIVATE cfiber cfiber_test project_flags)
+    target_link_libraries(test_death PRIVATE cfiber_test project_flags)
     if(CFIBER_REACTOR)
         target_compile_definitions(test_death PRIVATE CFIBER_TEST_HAVE_REACTOR=1)
         target_link_libraries(test_death PRIVATE cfiber_reactor)
@@ -179,7 +181,7 @@ if(CFIBER_STACK_SANITIZER)
         add_executable(test_stack_sanitizer stack/test_stack_sanitizer.c)
     endif()
     target_include_directories(test_stack_sanitizer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(test_stack_sanitizer PRIVATE cfiber cfiber_test project_flags)
+    target_link_libraries(test_stack_sanitizer PRIVATE cfiber_test project_flags)
 
     if(_cfiber_register_ctest)
         add_test(NAME stack_sanitizer COMMAND test_stack_sanitizer)

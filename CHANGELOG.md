@@ -7,6 +7,14 @@ change the API.
 
 ## [Unreleased]
 
+### Added
+
+- macOS support, Apple Silicon (arm64) only: growable stacks recycle with
+  `MADV_FREE_REUSABLE`, the assembly builds through the Mach-O branch of
+  `asm_defs.inc`, and a native `macos-15` CI job covers Release, Debug, ASan
+  and the shared `libcfiber.dylib`. The reactor, fuzzing and ThreadSanitizer
+  stay Linux-only; x86_64 macOS is not claimed.
+
 ### Changed
 
 - The hosted assembly files take their object-format bracketing (symbol
