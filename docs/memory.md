@@ -83,7 +83,10 @@ and writable across its whole extent, and the kernel commits a physical page the
 first time the fiber's stack pointer reaches it. `MAP_NORESERVE` keeps the
 untouched remainder from counting against commit accounting under the default
 overcommit heuristic; with `vm.overcommit_memory=2` the whole extent is charged
-at `mmap` time. An idle fiber costs
+at `mmap` time. On Darwin there is no overcommit toggle, `MAP_NORESERVE` is
+accepted and ignored, `MAP_STACK` does not exist (the flag compiles out), and
+pages are 16 KiB, so the guard page and the growth granularity are four times
+the common x86-64 size. An idle fiber costs
 the pages it has actually touched, not the pages it might touch, which is what
 makes tens of thousands of reactor fibers with a 64 KB ceiling practical.
 
@@ -94,7 +97,8 @@ happened to sit below.
 
 `cfiber_growable_stack_allocator_t` pools these. It keeps up to `cache_capacity` stacks
 for reuse and can pre-allocate `initial_cached` of them. A stack returned to the
-pool is recycled with `MADV_DONTNEED` over its grown pages, keeping the top page
+pool is recycled with `MADV_DONTNEED` (`MADV_FREE_REUSABLE` on Darwin, where
+`MADV_DONTNEED` keeps pages resident) over its grown pages, keeping the top page
 warm: that drops the physical memory while leaving the mapping and the guard
 page in place, so reuse costs no `mmap` and the next fiber starts from a small
 resident footprint. `cfiber_growable_stack_allocator_destroy()` returns `-1` if stacks
