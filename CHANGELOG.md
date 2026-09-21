@@ -7,6 +7,8 @@ change the API.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-21
+
 ### Added
 
 - macOS support, Apple Silicon (arm64) only: growable stacks recycle with
@@ -65,5 +67,6 @@ before it was a pre-release hardening pass over an unversioned tree.
   helpers take a total deadline, `cfiber_reactor_run` reports failures.
 - `BUILD_TESTS` is `CFIBER_BUILD_TESTS` (the old name is accepted, deprecated).
 
-[Unreleased]: https://github.com/aotodev/cfiber/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/aotodev/cfiber/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/aotodev/cfiber/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/aotodev/cfiber/releases/tag/v0.1.0
