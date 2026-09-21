@@ -1,14 +1,13 @@
 /* SPDX-FileCopyrightText: 2026 Aoto
  * SPDX-License-Identifier: MIT */
 
-.global cfiber_switch_context
-.type cfiber_switch_context, %function
+#include "asm_defs.inc"
 
 # void cfiber_switch_context(cfiber_context_t* old, const cfiber_context_t* new)
 # x0 = old context pointer
 # x1 = new context pointer
 
-cfiber_switch_context:
+FUNC_BEGIN(cfiber_switch_context)
     #----------------------------------------------------------------------------#
     # 1) Save current context to old (x0)                                        #
     #----------------------------------------------------------------------------#
@@ -74,6 +73,6 @@ cfiber_switch_context:
     # Return to the address in x30
     ret
 
-.size cfiber_switch_context, .-cfiber_switch_context
+FUNC_END(cfiber_switch_context)
 
-.section .note.GNU-stack, "", %progbits
+ASM_FILE_END

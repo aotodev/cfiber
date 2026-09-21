@@ -111,11 +111,16 @@ rationale (that goes to `docs/`), no selling.
 ## Assembly
 
 - One `.S` per architecture and concern; the C-level signature in a comment at
-  the top; every function ends with `.size`.
+  the top.
+- Hosted files never use raw object-format directives (`.type`, `.size`,
+  `.hidden`, `.note.GNU-stack`); they take the macros from
+  `src/cfiber/fiber/asm_defs.inc`: `FUNC_BEGIN`/`FUNC_END` around every
+  function, `FUNC_HIDDEN` for internal entry points, `ASM_FILE_END` as the
+  last line, `SYM()` on every symbol crossing the C/assembly boundary.
 - x86_64: `.intel_syntax noprefix`. Cortex-M: `.syntax unified`, `.thumb`,
-  `.thumb_func`. Hosted files end with a `.note.GNU-stack` section.
-- Internal entry points are `.hidden`. Field offsets follow
-  `cfiber_context_t` in `context.h`; change both together.
+  `.thumb_func`; the Cortex-M files are ELF-only and keep the raw directives.
+- Field offsets follow `cfiber_context_t` in `context.h`; change both
+  together.
 - Sanitizer hooks are gated on `#if CFIBER_ASAN_ENABLED`, the same define the
   C side uses.
 
