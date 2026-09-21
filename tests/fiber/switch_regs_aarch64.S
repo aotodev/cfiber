@@ -1,6 +1,8 @@
 /* SPDX-FileCopyrightText: 2026 Aoto
  * SPDX-License-Identifier: MIT */
 
+#include "cfiber/fiber/asm_defs.inc"
+
 .text
 
 // void cfiber_test_switch_regs(cfiber_context_t* self, cfiber_context_t* other,
@@ -9,10 +11,7 @@
 // Loads magic into the callee-saved set, switches, stores the set on return.
 // Nothing compiler-generated runs between load, switch and store.
 
-.global cfiber_test_switch_regs
-.type cfiber_test_switch_regs, %function
-
-cfiber_test_switch_regs:
+FUNC_BEGIN(cfiber_test_switch_regs)
     sub     sp, sp, #176
     stp     x29, x30, [sp, #0]
     stp     x19, x20, [sp, #16]
@@ -37,7 +36,7 @@ cfiber_test_switch_regs:
     ldp     d12, d13, [x2, #120]
     ldp     d14, d15, [x2, #136]
 
-    bl      cfiber_switch_context
+    bl      SYM(cfiber_switch_context)
 
     ldr     x3, [sp, #160]
     stp     x19, x20, [x3, #0]
@@ -64,19 +63,16 @@ cfiber_test_switch_regs:
     add     sp, sp, #176
     ret
 
-.size cfiber_test_switch_regs, .-cfiber_test_switch_regs
+FUNC_END(cfiber_test_switch_regs)
 
 // void cfiber_test_fiber_entry(void* user_data)
 // Fiber entry point: forwards the untouched entry sp to
 // cfiber_test_fiber_main(user_data, sp).
 
-.global cfiber_test_fiber_entry
-.type cfiber_test_fiber_entry, %function
-
-cfiber_test_fiber_entry:
+FUNC_BEGIN(cfiber_test_fiber_entry)
     mov     x1, sp
-    b       cfiber_test_fiber_main
+    b       SYM(cfiber_test_fiber_main)
 
-.size cfiber_test_fiber_entry, .-cfiber_test_fiber_entry
+FUNC_END(cfiber_test_fiber_entry)
 
-.section .note.GNU-stack, "", %progbits
+ASM_FILE_END

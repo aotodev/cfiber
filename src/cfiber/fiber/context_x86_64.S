@@ -1,12 +1,11 @@
 /* SPDX-FileCopyrightText: 2026 Aoto
  * SPDX-License-Identifier: MIT */
 
+#include "asm_defs.inc"
+
 .intel_syntax noprefix
 
-.global cfiber_switch_context
-.type cfiber_switch_context, @function
-
-cfiber_switch_context:
+FUNC_BEGIN(cfiber_switch_context)
     # Save current context (first parameter in %rdi)
     mov     [rdi + 0x00], rsp
     mov     [rdi + 0x08], r15
@@ -32,6 +31,6 @@ cfiber_switch_context:
 
     ret
 
-.size cfiber_switch_context, .-cfiber_switch_context
+FUNC_END(cfiber_switch_context)
 
-.section .note.GNU-stack, "", @progbits
+ASM_FILE_END

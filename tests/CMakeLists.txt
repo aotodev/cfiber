@@ -37,7 +37,10 @@ else()
     )
 endif()
 
-target_include_directories(${_cfiber_test_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# src: switch_regs_*.S include cfiber/fiber/asm_defs.inc
+target_include_directories(${_cfiber_test_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(${_cfiber_test_name} PRIVATE cfiber cfiber_test project_flags m) # m: fenv
 
 if(_cfiber_register_ctest)

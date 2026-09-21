@@ -70,6 +70,7 @@ are compiled into the consumer rather than linked against.
 
 | File | Purpose |
 | ---- | ------- |
+| `asm_defs.inc` | object-format bracketing for the hosted files: ELF or Mach-O, selected on `__APPLE__` |
 | `context_x86_64.S`, `context_aarch64.S` | `cfiber_switch_context` for the 64-bit hosts |
 | `context_armv6-m.S`, `context_armv7-m.S` | `cfiber_switch_context` for Thumb-1 and Thumb-2 |
 | `fiber_prologue_x86_64_fiber.S` | first-entry prologue, System V AMD64 |

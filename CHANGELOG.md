@@ -7,6 +7,13 @@ change the API.
 
 ## [Unreleased]
 
+### Changed
+
+- The hosted assembly files take their object-format bracketing (symbol
+  naming, visibility, function type and size, the GNU-stack note) from
+  `src/cfiber/fiber/asm_defs.inc`, with an ELF and a Mach-O branch. No
+  change to the emitted ELF objects.
+
 ## [0.1.0] - 2026-09-20
 
 First tagged release. Everything below is what the tag contains; the history
