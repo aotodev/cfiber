@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![x86_64](https://github.com/aotodev/cfiber/actions/workflows/x86_64.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/x86_64.yml)
 [![aarch64](https://github.com/aotodev/cfiber/actions/workflows/aarch64.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/aarch64.yml)
+[![macos](https://github.com/aotodev/cfiber/actions/workflows/macos.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/macos.yml)
 [![cortex-m0](https://github.com/aotodev/cfiber/actions/workflows/cortex-m0.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/cortex-m0.yml)
 [![cortex-m3](https://github.com/aotodev/cfiber/actions/workflows/cortex-m3.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/cortex-m3.yml)
 [![cortex-m4](https://github.com/aotodev/cfiber/actions/workflows/cortex-m4.yml/badge.svg?branch=master)](https://github.com/aotodev/cfiber/actions/workflows/cortex-m4.yml)
@@ -39,11 +40,13 @@ cooperative scheduler and the allocators to back them. Two targets, one API:
 | ------------------- | -------------- | ------------------------------------ |
 | x86_64 Linux        | System V AMD64 | Native                               |
 | AArch64 Linux       | AAPCS64        | `qemu-aarch64` user-mode emulation   |
+| macOS arm64         | AAPCS64 (Apple)| Native (GitHub `macos-15` runner)    |
 | ARM Cortex-M0 / M0+ | AAPCS Thumb-1  | `qemu-system-arm -M microbit`        |
 | ARM Cortex-M3       | AAPCS Thumb-2  | `qemu-system-arm -M mps2-an385`      |
 | ARM Cortex-M4 / M7  | AAPCS Thumb-2  | `qemu-system-arm -M mps2-an386/an500`|
 
-No other host is supported. The reactor and the fuzz targets are Linux only.
+No other host is supported (x86_64 macOS is not claimed). The reactor, the
+fuzz targets and ThreadSanitizer are Linux only.
 
 ## Why fibers
 
@@ -117,8 +120,9 @@ Cross-compilation, the full option table and integration notes are in
 
 Every push runs the CI matrix above: x86_64 under AddressSanitizer,
 UndefinedBehaviorSanitizer and the stack sanitizer, AArch64 under `qemu-user`,
-Cortex-M0/M3/M4/M7 under `qemu-system-arm`, the reactor under ThreadSanitizer,
-and libFuzzer harnesses for the allocators, the scheduler and the reactor.
+macOS arm64 natively (Release, Debug, ASan, shared), Cortex-M0/M3/M4/M7 under
+`qemu-system-arm`, the reactor under ThreadSanitizer, and libFuzzer harnesses
+for the allocators, the scheduler and the reactor.
 Per-architecture tests check the callee-saved set across a context switch.
 
 This is a young library. Treat the above as what is exercised today, not as a

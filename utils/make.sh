@@ -14,9 +14,9 @@
 #   -t, --tests        Build and run unit tests
 #   -v, --verbose      Verbose build output
 #       --sanitizer    Enable the stack sanitizer (canary + watermark)
-#       --asan         Enable AddressSanitizer (hosted x86_64 only)
-#       --ubsan        Enable UndefinedBehaviorSanitizer (hosted x86_64 only)
-#       --tsan         Enable ThreadSanitizer (hosted x86_64 only; implies --reactor)
+#       --asan         Enable AddressSanitizer (hosted native builds only)
+#       --ubsan        Enable UndefinedBehaviorSanitizer (hosted native builds only)
+#       --tsan         Enable ThreadSanitizer (Linux x86_64 only; implies --reactor)
 #       --shared       Build cfiber as a shared library (default: static)
 #       --pic          Build the static library with -fPIC
 #       --reactor      Build + test the optional epoll reactor (Linux only)
@@ -62,11 +62,11 @@ Usage: $(basename "$0") [options]
   -t, --tests        Build and run unit tests
   -v, --verbose      Verbose build output
       --sanitizer    Enable the stack sanitizer (canary + watermark)
-      --asan         Enable AddressSanitizer (hosted x86_64 only; mutually
-                     exclusive with --sanitizer)
-      --ubsan        Enable UndefinedBehaviorSanitizer (hosted x86_64 only; may
-                     be combined with --asan)
-      --tsan         Enable ThreadSanitizer (hosted x86_64 only; mutually
+      --asan         Enable AddressSanitizer (hosted native builds only;
+                     mutually exclusive with --sanitizer)
+      --ubsan        Enable UndefinedBehaviorSanitizer (hosted native builds
+                     only; may be combined with --asan)
+      --tsan         Enable ThreadSanitizer (Linux x86_64 only; mutually
                      exclusive with --asan; implies --reactor)
       --shared       Build cfiber as a shared library (default: static)
       --pic          Build the static library with -fPIC (ignored with --shared)
@@ -90,12 +90,12 @@ project_root=$(cd "${script_dir}/.." && pwd)
 cd "${project_root}"
 
 # --------------------------------------------------------------------------------------
-# Host OS / job-count detection. Linux, or macOS unverified. Not Windows.
+# Host OS / job-count detection. Linux or macOS. Not Windows.
 # --------------------------------------------------------------------------------------
 host_os="$(uname -s)"
 case "${host_os}" in
     Linux|Darwin) ;;
-    *) die "unsupported host OS: '${host_os}' (cfiber builds on Linux; macOS is unverified)" ;;
+    *) die "unsupported host OS: '${host_os}' (cfiber builds on Linux and macOS)" ;;
 esac
 
 detect_jobs() {

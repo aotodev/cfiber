@@ -8,6 +8,9 @@
   used (`constexpr`, `nullptr`, `#elifdef`) and are unverified.
 - For ARM cross-builds: `arm-none-eabi-gcc` and `qemu-system-arm`
 - For AArch64 cross-builds: `aarch64-linux-gnu-gcc` and `qemu-user`
+- On macOS (arm64 only): Apple Clang 17 or newer (Xcode 16.3+) for C23
+  `constexpr`; on an older Xcode, `brew install llvm` and point `CC` at it.
+  Native builds need no coreutils; `timeout` is only used for QEMU runs.
 
 Select a compiler at configure time with `CC=clang cmake ...` or
 `CC=clang ./utils/make.sh ...`.
@@ -80,7 +83,9 @@ library and everything linked against it must be built with the same
 The default is a static archive. Shared builds export only the documented API
 (everything declared with `CFIBER_EXPORT` in the public headers) and hide
 everything else via `-fvisibility=hidden`. Shared builds carry the major
-version as `SOVERSION`.
+version as `SOVERSION`; on macOS this yields `libcfiber.dylib` with the same
+versioned names, and a consumer run against a staged install needs
+`DYLD_LIBRARY_PATH` where Linux uses `LD_LIBRARY_PATH`.
 
 ## API and ABI
 
